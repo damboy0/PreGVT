@@ -77,6 +77,7 @@ contract DeployPreGVT is Script {
             BADGE_ID,
             RESERVE_CAP,
             PRESALE_CAP, // NEW
+            TREASURY,
             INITIAL_ADMIN
         );
 
@@ -177,16 +178,16 @@ contract DeployPreGVT is Script {
  */
 contract SetupPreGVT is Script {
     // Update these after deployment
-    address constant PREGVT_ADDRESS = address(0); // UPDATE THIS
-    address constant BADGE_ADDRESS = address(0); // UPDATE THIS
-    address constant TREASURY_ADDRESS = address(0); // NEW: UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0x5FbDB2315678afecb367f032d93F642f64180aa3); // UPDATE THIS
+    address BADGE_ADDRESS = 0xd1215311b1CabDb911BCaAAc2ebcB291C7659cdc; // UPDATE THIS
+    address payable TREASURY_ADDRESS = payable(0x91935e2e959fb504640280C08530156c67F89479);
 
     function run() external {
         require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
         require(BADGE_ADDRESS != address(0), "Update BADGE_ADDRESS");
         require(TREASURY_ADDRESS != address(0), "Update TREASURY_ADDRESS"); // NEW
 
-        uint256 adminPrivateKey = vm.envUint("ADMIN_PRIVATE_KEY");
+        uint256 adminPrivateKey = vm.envUint("PRIVATE_KEY");
 
         console.log("====================================");
         console.log("PreGVT Post-Deployment Setup");
@@ -194,12 +195,12 @@ contract SetupPreGVT is Script {
 
         vm.startBroadcast(adminPrivateKey);
 
-        address payable preGvtAddress = payable(vm.envAddress("PREGVT_ADDRESS"));
+        address payable preGvtAddress = payable(0x5FbDB2315678afecb367f032d93F642f64180aa3);
         PreGVT preGVT = PreGVT(preGvtAddress);
 
         // NEW: Set treasury
-        preGVT.setTreasury(TREASURY_ADDRESS);
-        console.log("Treasury set to:", TREASURY_ADDRESS);
+        // preGVT.setTreasury(TREASURY_ADDRESS);
+        // console.log("Treasury set to:", TREASURY_ADDRESS);
 
         // Unpause if needed
         if (preGVT.paused()) {
@@ -223,7 +224,7 @@ contract ConfigurePresale is Script {
     address payable PREGVT_ADDRESS; // UPDATE THIS
 
     // Presale configuration - UPDATE THESE
-    uint256 constant PRICE_PER_TOKEN = 0.01 ether; // 0.01 ETH per token
+    uint256 constant PRICE_PER_TOKEN = 0.005 * 1e18; // 0.005 USDT per token (add 18 decimals)
     bool constant BADGE_REQUIRED = false; // Set to true if badge holders only
     uint256 constant PER_USER_LIMIT = 10_000e18; // 10,000 tokens per user (0 = no limit)
 
@@ -292,7 +293,7 @@ contract ActivatePresale is Script {
  */
 contract UpdatePrice is Script {
     address payable PREGVT_ADDRESS;
-    uint256 constant NEW_PRICE = 0.02 ether; // UPDATE THIS
+    uint256 constant NEW_PRICE = 0.005 * 1e18; // ADD 18 DECIMALS TO USDT AMOUNT
 
     function run() external {
         require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");

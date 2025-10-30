@@ -50,10 +50,11 @@ contract PreGVTTest is Test {
     address public user2 = address(4);
     address public user3 = address(5);
     address public migrator = address(6);
+    address public treasury = address(7);
 
     uint256 public constant BADGE_ID = 1;
-    uint256 public constant AIRDROP_RESERVE_CAP = 1_000_000e18; // 1M tokens
-    uint256 public constant PRESALE_RESERVE_CAP = 1_000_000e18; // 1M tokens
+    uint256 public constant AIRDROP_RESERVE_CAP = 1_000_000e18;
+    uint256 public constant PRESALE_SUPPLY_CAP = 1_000_000e18; // Fixed name
 
     event AirdropReserveDefined(uint256 cap);
     event AirdropDistributed(address indexed to, uint256 amount, uint256 newTotalMinted);
@@ -64,65 +65,35 @@ contract PreGVTTest is Test {
     event AllocationSet(address indexed user, uint256 amount);
 
     function setUp() public {
-        // Deploy mock badge
         badge = new MockGenesisBadge();
 
-        // Deploy PreGVT
         vm.prank(admin);
-        preGVT = new PreGVT(address(badge), BADGE_ID, AIRDROP_RESERVE_CAP, PRESALE_RESERVE_CAP, admin);
+        preGVT = new PreGVT(address(badge), BADGE_ID, AIRDROP_RESERVE_CAP, PRESALE_SUPPLY_CAP, treasury, admin);
 
-        // Set PreGVT as operator on badge
         badge.setOperator(address(preGVT), true);
 
-        // Setup roles
         vm.startPrank(admin);
         preGVT.grantRole(preGVT.DISTRIBUTOR_ROLE(), distributor);
         vm.stopPrank();
 
-        // Mint badges to test users
         badge.mint(user1, BADGE_ID, 1);
         badge.mint(user2, BADGE_ID, 1);
         badge.mint(user3, BADGE_ID, 1);
     }
 
-    // ============ Deployment Tests ============
-
     function testDeployment() public {
         assertEq(address(preGVT.badge()), address(badge));
         assertEq(preGVT.badgeId(), BADGE_ID);
         assertEq(preGVT.airdropReserveCap(), AIRDROP_RESERVE_CAP);
-        //  assertEq(preGVT.presaleReserveCap(), PRESALE_RESERVE_CAP);
+        assertEq(preGVT.presaleSupplyCap(), PRESALE_SUPPLY_CAP);
+        assertEq(preGVT.treasury(), treasury);
         assertEq(preGVT.airdropReserveMinted(), 0);
         assertTrue(preGVT.hasRole(preGVT.DEFAULT_ADMIN_ROLE(), admin));
     }
 
-    // function testDeploymentEmitsEvent() public {
-    //     vm.expectEmit(true, true, true, true);
-    //     emit AirdropReserveDefined(RESERVE_CAP);
-
-    //     vm.prank(admin);
-    //     new PreGVT(address(badge), BADGE_ID, RESERVE_CAP, admin);
-    // }
-
-    // function testDeploymentRevertsZeroAddress() public {
-    //     vm.expectRevert(PreGVT.ZeroAddress.selector);
-    //     new PreGVT(address(0), BADGE_ID, RESERVE_CAP, admin);
-
-    //     vm.expectRevert(PreGVT.ZeroAddress.selector);
-    //     new PreGVT(address(badge), BADGE_ID, RESERVE_CAP, address(0));
-    // }
-
-    // function testDeploymentRevertsZeroAmount() public {
-    //     vm.expectRevert(PreGVT.ZeroAmount.selector);
-    //     new PreGVT(address(badge), BADGE_ID, 0, admin);
-    // }
-
-    // ============ View Function Tests ============
-
     function testAirdropReserveRemaining() public {
         assertEq(preGVT.airdropReserveRemaining(), AIRDROP_RESERVE_CAP);
 
-        // Mint some tokens
         vm.startPrank(distributor);
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);
@@ -142,7 +113,6 @@ contract PreGVTTest is Test {
     function testAllowanceOf() public {
         assertEq(preGVT.allowanceOf(user1), 0);
 
-        // Set allocation
         vm.startPrank(distributor);
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);
@@ -153,8 +123,6 @@ contract PreGVTTest is Test {
 
         assertEq(preGVT.allowanceOf(user1), 500e18);
     }
-
-    // ============ Admin Function Tests ============
 
     function testPauseUnpause() public {
         vm.startPrank(admin);
@@ -197,8 +165,6 @@ contract PreGVTTest is Test {
         vm.prank(admin);
         preGVT.setMigrator(address(0));
     }
-
-    // ============ SetAllocations Tests ============
 
     function testSetAllocations() public {
         address[] memory users = new address[](2);
@@ -264,8 +230,6 @@ contract PreGVTTest is Test {
         preGVT.setAllocations(users, amounts);
     }
 
-    // ============ BatchAirdrop Tests ============
-
     function testBatchAirdrop() public {
         address[] memory users = new address[](2);
         uint256[] memory amounts = new uint256[](2);
@@ -292,7 +256,7 @@ contract PreGVTTest is Test {
     function testBatchAirdropRevertsNoBadge() public {
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);
-        users[0] = address(999); // No badge
+        users[0] = address(999);
         amounts[0] = 1000e18;
 
         vm.expectRevert(PreGVT.NoBadge.selector);
@@ -325,10 +289,7 @@ contract PreGVTTest is Test {
         preGVT.batchAirdrop(users, amounts);
     }
 
-    // ============ ClaimAllocated Tests ============
-
     function testClaimAllocated() public {
-        // Set allocation
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         users[0] = user1;
@@ -359,7 +320,6 @@ contract PreGVTTest is Test {
     }
 
     function testClaimAllocatedRevertsNoBadge() public {
-        // Set allocation but remove badge
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         users[0] = address(999);
@@ -372,8 +332,6 @@ contract PreGVTTest is Test {
         vm.prank(address(999));
         preGVT.claimAllocated();
     }
-
-    // ============ ClaimWithBadge Tests ============
 
     function testClaimWithBadge() public {
         uint256 claimAmount = 7500e18;
@@ -403,10 +361,7 @@ contract PreGVTTest is Test {
         preGVT.claimWithBadge(1000e18);
     }
 
-    // ============ Migration Tests ============
-
     function testMigrateToGVT() public {
-        // Setup: give user1 some preGVT
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         users[0] = user1;
@@ -415,7 +370,6 @@ contract PreGVTTest is Test {
         vm.prank(distributor);
         preGVT.batchAirdrop(users, amounts);
 
-        // Enable migration
         vm.prank(admin);
         preGVT.setMigrator(migrator);
 
@@ -445,10 +399,7 @@ contract PreGVTTest is Test {
         preGVT.migrateToGVT();
     }
 
-    // ============ Non-Transferable Tests ============
-
     function testTransferReverts() public {
-        // Give user1 some tokens
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         users[0] = user1;
@@ -486,8 +437,6 @@ contract PreGVTTest is Test {
         preGVT.decreaseAllowance(user2, 1000e18);
     }
 
-    // ============ Reserve Cap Tests ============
-
     function testReserveCapEnforcement() public {
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);
@@ -503,10 +452,7 @@ contract PreGVTTest is Test {
         vm.stopPrank();
     }
 
-    // ============ Integration Tests ============
-
     function testFullClaimFlow() public {
-        // 1. Admin sets allocations
         address[] memory users = new address[](3);
         uint256[] memory amounts = new uint256[](3);
         users[0] = user1;
@@ -519,7 +465,6 @@ contract PreGVTTest is Test {
         vm.prank(distributor);
         preGVT.setAllocations(users, amounts);
 
-        // 2. Users claim
         vm.prank(user1);
         preGVT.claimAllocated();
 
@@ -529,17 +474,14 @@ contract PreGVTTest is Test {
         vm.prank(user3);
         preGVT.claimAllocated();
 
-        // 3. Verify balances
         assertEq(preGVT.balanceOf(user1), 1000e18);
         assertEq(preGVT.balanceOf(user2), 2000e18);
         assertEq(preGVT.balanceOf(user3), 3000e18);
         assertEq(preGVT.airdropReserveMinted(), 6000e18);
 
-        // 4. Setup migration
         vm.prank(admin);
         preGVT.setMigrator(migrator);
 
-        // 5. Users migrate
         vm.prank(user1);
         preGVT.migrateToGVT();
 
@@ -547,7 +489,6 @@ contract PreGVTTest is Test {
     }
 
     function testMixedClaimPatterns() public {
-        // Pattern B: Preloaded allocation
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         users[0] = user1;
@@ -559,8 +500,7 @@ contract PreGVTTest is Test {
         vm.prank(user1);
         preGVT.claimAllocated();
 
-        // Pattern A: Direct claim with badge
-        badge.mint(user2, BADGE_ID, 1); // Give another badge
+        badge.mint(user2, BADGE_ID, 1);
         vm.prank(user2);
         preGVT.claimWithBadge(3000e18);
 
