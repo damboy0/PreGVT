@@ -18,14 +18,16 @@ interface IGenesisBadge1155 {
 
 /**
  * @title PreGVT
- * @notice Non-transferable pre-token for badge-gated airdrops
- * @dev Implements formal airdrop reserve with badge-gated claims
+ * @notice Non-transferable pre-token for badge-gated airdrops with presale
+ * @dev Implements formal airdrop reserve with badge-gated claims and public presale
  */
 contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     // ============ Roles ============
 
     bytes32 public constant DISTRIBUTOR_ROLE = keccak256("DISTRIBUTOR_ROLE");
     bytes32 public constant MIGRATOR_SETTER_ROLE = keccak256("MIGRATOR_SETTER_ROLE");
+    bytes32 public constant PRICE_MANAGER_ROLE = keccak256("PRICE_MANAGER_ROLE");
+    bytes32 public constant TREASURY_ROLE = keccak256("TREASURY_ROLE");
 
     // ============ Immutable State ============
 
@@ -38,10 +40,16 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Maximum tokens that can ever be minted from airdrop reserve
     uint256 public immutable airdropReserveCap;
 
+    /// @notice Maximum tokens that can be sold in presale
+    uint256 public immutable presaleSupplyCap;
+
     // ============ Mutable State ============
 
     /// @notice Total tokens minted from airdrop reserve
     uint256 public airdropReserveMinted;
+
+    /// @notice Total tokens sold in presale
+    uint256 public presaleSold;
 
     /// @notice Preloaded allocations per user (Pattern B)
     mapping(address => uint256) public claimable;
@@ -52,6 +60,24 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Whether migration to main token is enabled
     bool public migrationEnabled;
 
+    /// @notice Price per token in wei (e.g., 0.01 ETH = 10000000000000000)
+    uint256 public pricePerToken;
+
+    /// @notice Whether presale is active
+    bool public presaleActive;
+
+    /// @notice Treasury address for receiving funds
+    address public treasury;
+
+    /// @notice Whether badge is required for purchasing
+    bool public badgeRequiredForPurchase;
+
+    /// @notice Per-user purchase limit (0 = no limit)
+    uint256 public perUserPurchaseLimit;
+
+    /// @notice Track user purchases for limit enforcement
+    mapping(address => uint256) public userPurchases;
+
     // ============ Events ============
 
     event AirdropReserveDefined(uint256 cap);
@@ -61,6 +87,12 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     event MigrationEnabled(address indexed migrator);
     event Migrated(address indexed user, uint256 preGVTAmount);
     event AllocationSet(address indexed user, uint256 amount);
+    event PresaleConfigured(uint256 pricePerToken, bool badgeRequired, uint256 perUserLimit);
+    event PresaleStatusChanged(bool active);
+    event TokensPurchased(address indexed buyer, uint256 amount, uint256 cost);
+    event TreasurySet(address indexed treasury);
+    event PriceUpdated(uint256 newPrice);
+    event FundsWithdrawn(address indexed to, uint256 amount);
 
     // ============ Errors ============
 
@@ -74,6 +106,13 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     error ArrayLengthMismatch();
     error ZeroAddress();
     error ZeroAmount();
+    error PresaleNotActive();
+    error PresaleCapExceeded();
+    error InsufficientPayment();
+    error InvalidPrice();
+    error TreasuryNotSet();
+    error PurchaseLimitExceeded();
+    error BadgeRequiredForPurchase();
 
     // ============ Constructor ============
 
@@ -81,12 +120,17 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      * @notice Initialize PreGVT contract
      * @param _badge Address of Genesis Badge contract
      * @param _badgeId ID of the badge required for claims
-     * @param _airdropReserveCap Maximum tokens that can be minted
+     * @param _airdropReserveCap Maximum tokens that can be minted from airdrop
+     * @param _presaleSupplyCap Maximum tokens that can be sold in presale
      * @param _initialAdmin Address to receive admin role
      */
-    constructor(address _badge, uint256 _badgeId, uint256 _airdropReserveCap, address _initialAdmin)
-        ERC20("preGVT", "preGVT")
-    {
+    constructor(
+        address _badge,
+        uint256 _badgeId,
+        uint256 _airdropReserveCap,
+        uint256 _presaleSupplyCap,
+        address _initialAdmin
+    ) ERC20("preGVT", "preGVT") {
         if (_badge == address(0)) revert ZeroAddress();
         if (_initialAdmin == address(0)) revert ZeroAddress();
         if (_airdropReserveCap == 0) revert ZeroAmount();
@@ -94,10 +138,13 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         badge = IGenesisBadge1155(_badge);
         badgeId = _badgeId;
         airdropReserveCap = _airdropReserveCap;
+        presaleSupplyCap = _presaleSupplyCap;
 
         _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
         _grantRole(DISTRIBUTOR_ROLE, _initialAdmin);
         _grantRole(MIGRATOR_SETTER_ROLE, _initialAdmin);
+        _grantRole(PRICE_MANAGER_ROLE, _initialAdmin);
+        _grantRole(TREASURY_ROLE, _initialAdmin);
 
         emit AirdropReserveDefined(_airdropReserveCap);
     }
@@ -110,6 +157,14 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      */
     function airdropReserveRemaining() external view returns (uint256) {
         return airdropReserveCap - airdropReserveMinted;
+    }
+
+    /**
+     * @notice Get remaining presale supply
+     * @return Tokens still available for presale
+     */
+    function presaleRemaining() external view returns (uint256) {
+        return presaleSupplyCap - presaleSold;
     }
 
     /**
@@ -130,20 +185,104 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         return claimable[user];
     }
 
+    /**
+     * @notice Calculate cost for purchasing amount of tokens
+     * @param amount Number of tokens to purchase
+     * @return cost Total cost in wei
+     */
+    function calculateCost(uint256 amount) public view returns (uint256 cost) {
+        return amount * pricePerToken;
+    }
+
+    /**
+     * @notice Get remaining purchase limit for user
+     * @param user Address to check
+     * @return remaining Remaining tokens user can purchase
+     */
+    function remainingPurchaseLimit(address user) external view returns (uint256) {
+        if (perUserPurchaseLimit == 0) return type(uint256).max;
+        uint256 purchased = userPurchases[user];
+        return purchased >= perUserPurchaseLimit ? 0 : perUserPurchaseLimit - purchased;
+    }
+
     // ============ Admin Functions ============
 
     /**
-     * @notice Pause all claim operations
+     * @notice Pause all claim and purchase operations
      */
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _pause();
     }
 
     /**
-     * @notice Unpause all claim operations
+     * @notice Unpause all claim and purchase operations
      */
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _unpause();
+    }
+
+    /**
+     * @notice Configure presale parameters
+     * @param _pricePerToken Price per token in wei
+     * @param _badgeRequired Whether badge is required for purchase
+     * @param _perUserLimit Per-user purchase limit (0 = no limit)
+     */
+    function configurePresale(
+        uint256 _pricePerToken,
+        bool _badgeRequired,
+        uint256 _perUserLimit
+    ) external onlyRole(PRICE_MANAGER_ROLE) {
+        if (_pricePerToken == 0) revert InvalidPrice();
+        
+        pricePerToken = _pricePerToken;
+        badgeRequiredForPurchase = _badgeRequired;
+        perUserPurchaseLimit = _perUserLimit;
+
+        emit PresaleConfigured(_pricePerToken, _badgeRequired, _perUserLimit);
+    }
+
+    /**
+     * @notice Update token price
+     * @param _pricePerToken New price per token in wei
+     */
+    function updatePrice(uint256 _pricePerToken) external onlyRole(PRICE_MANAGER_ROLE) {
+        if (_pricePerToken == 0) revert InvalidPrice();
+        pricePerToken = _pricePerToken;
+        emit PriceUpdated(_pricePerToken);
+    }
+
+    /**
+     * @notice Set treasury address
+     * @param _treasury Treasury address for receiving funds
+     */
+    function setTreasury(address _treasury) external onlyRole(TREASURY_ROLE) {
+        if (_treasury == address(0)) revert ZeroAddress();
+        treasury = _treasury;
+        emit TreasurySet(_treasury);
+    }
+
+    /**
+     * @notice Enable or disable presale
+     * @param _active Whether presale should be active
+     */
+    function setPresaleActive(bool _active) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        presaleActive = _active;
+        emit PresaleStatusChanged(_active);
+    }
+
+    /**
+     * @notice Withdraw accumulated funds to treasury
+     */
+    function withdrawFunds() external onlyRole(TREASURY_ROLE) nonReentrant {
+        if (treasury == address(0)) revert TreasuryNotSet();
+        
+        uint256 balance = address(this).balance;
+        if (balance == 0) revert ZeroAmount();
+
+        (bool success, ) = treasury.call{value: balance}("");
+        require(success, "Transfer failed");
+
+        emit FundsWithdrawn(treasury, balance);
     }
 
     /**
@@ -165,7 +304,10 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      * @param users Array of user addresses
      * @param amounts Array of allocation amounts
      */
-    function setAllocations(address[] calldata users, uint256[] calldata amounts) external onlyRole(DISTRIBUTOR_ROLE) {
+    function setAllocations(address[] calldata users, uint256[] calldata amounts)
+        external
+        onlyRole(DISTRIBUTOR_ROLE)
+    {
         if (users.length != amounts.length) revert ArrayLengthMismatch();
 
         for (uint256 i = 0; i < users.length; i++) {
@@ -203,6 +345,45 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     }
 
     // ============ User Functions ============
+
+    /**
+     * @notice Buy tokens at presale price
+     * @param amount Number of tokens to purchase
+     */
+    function buy(uint256 amount) external payable whenNotPaused nonReentrant {
+        if (!presaleActive) revert PresaleNotActive();
+        if (amount == 0) revert ZeroAmount();
+        if (badgeRequiredForPurchase && !hasBadge(msg.sender)) revert BadgeRequiredForPurchase();
+
+        // Check presale cap
+        if (presaleSold + amount > presaleSupplyCap) revert PresaleCapExceeded();
+
+        // Check per-user limit
+        if (perUserPurchaseLimit > 0) {
+            if (userPurchases[msg.sender] + amount > perUserPurchaseLimit) {
+                revert PurchaseLimitExceeded();
+            }
+        }
+
+        // Calculate and verify payment
+        uint256 cost = calculateCost(amount);
+        if (msg.value < cost) revert InsufficientPayment();
+
+        // Update state
+        presaleSold += amount;
+        userPurchases[msg.sender] += amount;
+
+        // Mint tokens
+        _mint(msg.sender, amount);
+
+        // Refund excess payment
+        if (msg.value > cost) {
+            (bool success, ) = msg.sender.call{value: msg.value - cost}("");
+            require(success, "Refund failed");
+        }
+
+        emit TokensPurchased(msg.sender, amount, cost);
+    }
 
     /**
      * @notice Claim preloaded allocation (Pattern B)
@@ -316,4 +497,9 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     function decreaseAllowance(address, uint256) public pure returns (bool) {
         revert ApprovalNotAllowed();
     }
+
+    /**
+     * @notice Allow contract to receive ETH
+     */
+    receive() external payable {}
 }
