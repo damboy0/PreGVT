@@ -227,13 +227,12 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      * @param _badgeRequired Whether badge is required for purchase
      * @param _perUserLimit Per-user purchase limit (0 = no limit)
      */
-    function configurePresale(
-        uint256 _pricePerToken,
-        bool _badgeRequired,
-        uint256 _perUserLimit
-    ) external onlyRole(PRICE_MANAGER_ROLE) {
+    function configurePresale(uint256 _pricePerToken, bool _badgeRequired, uint256 _perUserLimit)
+        external
+        onlyRole(PRICE_MANAGER_ROLE)
+    {
         if (_pricePerToken == 0) revert InvalidPrice();
-        
+
         pricePerToken = _pricePerToken;
         badgeRequiredForPurchase = _badgeRequired;
         perUserPurchaseLimit = _perUserLimit;
@@ -275,11 +274,11 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      */
     function withdrawFunds() external onlyRole(TREASURY_ROLE) nonReentrant {
         if (treasury == address(0)) revert TreasuryNotSet();
-        
+
         uint256 balance = address(this).balance;
         if (balance == 0) revert ZeroAmount();
 
-        (bool success, ) = treasury.call{value: balance}("");
+        (bool success,) = treasury.call{value: balance}("");
         require(success, "Transfer failed");
 
         emit FundsWithdrawn(treasury, balance);
@@ -304,10 +303,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      * @param users Array of user addresses
      * @param amounts Array of allocation amounts
      */
-    function setAllocations(address[] calldata users, uint256[] calldata amounts)
-        external
-        onlyRole(DISTRIBUTOR_ROLE)
-    {
+    function setAllocations(address[] calldata users, uint256[] calldata amounts) external onlyRole(DISTRIBUTOR_ROLE) {
         if (users.length != amounts.length) revert ArrayLengthMismatch();
 
         for (uint256 i = 0; i < users.length; i++) {
@@ -378,7 +374,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
 
         // Refund excess payment
         if (msg.value > cost) {
-            (bool success, ) = msg.sender.call{value: msg.value - cost}("");
+            (bool success,) = msg.sender.call{value: msg.value - cost}("");
             require(success, "Refund failed");
         }
 
