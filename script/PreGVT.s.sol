@@ -18,13 +18,20 @@ contract DeployPreGVT is Script {
     // Badge ID required for claims
     uint256 constant BADGE_ID = 1;
 
-    // Airdrop reserve cap (e.g., 3% of 100M = 3M tokens)
-    uint256 constant RESERVE_CAP = 3_000_000e18; // 3 million tokens
+    // Airdrop reserve cap
+    uint256 constant RESERVE_CAP = 30_000_000e18; // 30 million tokens
+
+    // NEW: Presale supply cap
+    uint256 constant PRESALE_CAP = 70_000_000e18; // 70 million tokens
 
     // Admin addresses (update these)
     address INITIAL_ADMIN;
     address DISTRIBUTOR;
     address MIGRATOR_SETTER;
+
+    // NEW: Treasury and price manager addresses
+    address TREASURY;
+    address PRICE_MANAGER;
 
     // Optional: Additional distributors to grant role
     address[] additionalDistributors;
@@ -40,11 +47,16 @@ contract DeployPreGVT is Script {
         DISTRIBUTOR = vm.envAddress("DISTRIBUTOR");
         MIGRATOR_SETTER = vm.envAddress("MIGRATOR_SETTER");
 
+        // NEW: Load treasury and price manager from environment
+        TREASURY = vm.envAddress("TREASURY");
+        PRICE_MANAGER = vm.envOr("PRICE_MANAGER", INITIAL_ADMIN); // Default to admin if not set
+
         // Validation
         require(BADGE_ADDRESS != address(0), "Update BADGE_ADDRESS");
         require(INITIAL_ADMIN != address(0), "Update INITIAL_ADMIN");
         require(DISTRIBUTOR != address(0), "Update DISTRIBUTOR");
         require(MIGRATOR_SETTER != address(0), "Update MIGRATOR_SETTER");
+        require(TREASURY != address(0), "Update TREASURY"); // NEW
 
         console.log("====================================");
         console.log("PreGVT Deployment");
@@ -54,12 +66,19 @@ contract DeployPreGVT is Script {
         console.log("Badge Address:", BADGE_ADDRESS);
         console.log("Badge ID:", BADGE_ID);
         console.log("Reserve Cap:", RESERVE_CAP / 1e18, "tokens");
+        console.log("Presale Cap:", PRESALE_CAP / 1e18, "tokens"); // NEW
         console.log("====================================");
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Deploy PreGVT
-        PreGVT preGVT = new PreGVT(BADGE_ADDRESS, BADGE_ID, RESERVE_CAP, INITIAL_ADMIN);
+        // Deploy PreGVT with NEW presale cap parameter
+        PreGVT preGVT = new PreGVT(
+            BADGE_ADDRESS,
+            BADGE_ID,
+            RESERVE_CAP,
+            PRESALE_CAP, // NEW
+            INITIAL_ADMIN
+        );
 
         console.log("PreGVT deployed at:", address(preGVT));
 
@@ -103,6 +122,18 @@ contract DeployPreGVT is Script {
             console.log("Granted MIGRATOR_SETTER_ROLE to:", MIGRATOR_SETTER);
         }
 
+        // NEW: Grant PRICE_MANAGER_ROLE
+        if (PRICE_MANAGER != address(0) && !preGVT.hasRole(preGVT.PRICE_MANAGER_ROLE(), PRICE_MANAGER)) {
+            preGVT.grantRole(preGVT.PRICE_MANAGER_ROLE(), PRICE_MANAGER);
+            console.log("Granted PRICE_MANAGER_ROLE to:", PRICE_MANAGER);
+        }
+
+        // NEW: Grant TREASURY_ROLE
+        if (TREASURY != address(0) && !preGVT.hasRole(preGVT.TREASURY_ROLE(), TREASURY)) {
+            preGVT.grantRole(preGVT.TREASURY_ROLE(), TREASURY);
+            console.log("Granted TREASURY_ROLE to:", TREASURY);
+        }
+
         console.log("Role setup complete!");
     }
 
@@ -117,18 +148,24 @@ contract DeployPreGVT is Script {
         console.log("- Badge Address:", BADGE_ADDRESS);
         console.log("- Badge ID:", BADGE_ID);
         console.log("- Reserve Cap:", RESERVE_CAP / 1e18, "tokens");
+        console.log("- Presale Cap:", PRESALE_CAP / 1e18, "tokens"); // NEW
         console.log("\nRoles:");
         console.log("- Admin:", INITIAL_ADMIN);
         console.log("- Distributor:", DISTRIBUTOR);
         console.log("- Migrator Setter:", MIGRATOR_SETTER);
+        console.log("- Treasury:", TREASURY); // NEW
+        console.log("- Price Manager:", PRICE_MANAGER); // NEW
         console.log("\n====================================");
         console.log("NEXT STEPS:");
         console.log("====================================");
         console.log("1. Verify contract on block explorer");
         console.log("2. Grant OPERATOR_ROLE on Badge contract to PreGVT");
-        console.log("3. Load allocations via setAllocations()");
-        console.log("4. Unpause contract when ready for claims");
-        console.log("5. Monitor AirdropDistributed events");
+        console.log("3. Configure presale via ConfigurePresale script"); // NEW
+        console.log("4. Set treasury via SetupPreGVT script"); // NEW
+        console.log("5. Load allocations via setAllocations()");
+        console.log("6. Activate presale when ready"); // NEW
+        console.log("7. Unpause contract when ready for claims");
+        console.log("8. Monitor AirdropDistributed and TokensPurchased events"); // UPDATED
         console.log("====================================\n");
     }
 }
@@ -142,10 +179,12 @@ contract SetupPreGVT is Script {
     // Update these after deployment
     address constant PREGVT_ADDRESS = address(0); // UPDATE THIS
     address constant BADGE_ADDRESS = address(0); // UPDATE THIS
+    address constant TREASURY_ADDRESS = address(0); // NEW: UPDATE THIS
 
     function run() external {
         require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
         require(BADGE_ADDRESS != address(0), "Update BADGE_ADDRESS");
+        require(TREASURY_ADDRESS != address(0), "Update TREASURY_ADDRESS"); // NEW
 
         uint256 adminPrivateKey = vm.envUint("ADMIN_PRIVATE_KEY");
 
@@ -155,7 +194,12 @@ contract SetupPreGVT is Script {
 
         vm.startBroadcast(adminPrivateKey);
 
-        PreGVT preGVT = PreGVT(PREGVT_ADDRESS);
+        address payable preGvtAddress = payable(vm.envAddress("PREGVT_ADDRESS"));
+        PreGVT preGVT = PreGVT(preGvtAddress);
+
+        // NEW: Set treasury
+        preGVT.setTreasury(TREASURY_ADDRESS);
+        console.log("Treasury set to:", TREASURY_ADDRESS);
 
         // Unpause if needed
         if (preGVT.paused()) {
@@ -171,12 +215,147 @@ contract SetupPreGVT is Script {
 }
 
 /**
+ * @title ConfigurePresale
+ * @notice NEW: Configure presale parameters
+ * @dev Run with: forge script script/DeployPreGVT.s.sol:ConfigurePresale --rpc-url <RPC_URL> --broadcast
+ */
+contract ConfigurePresale is Script {
+    address payable PREGVT_ADDRESS; // UPDATE THIS
+
+    // Presale configuration - UPDATE THESE
+    uint256 constant PRICE_PER_TOKEN = 0.01 ether; // 0.01 ETH per token
+    bool constant BADGE_REQUIRED = false; // Set to true if badge holders only
+    uint256 constant PER_USER_LIMIT = 10_000e18; // 10,000 tokens per user (0 = no limit)
+
+    function run() external {
+        require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
+        require(PRICE_PER_TOKEN > 0, "Update PRICE_PER_TOKEN");
+
+        uint256 priceManagerPrivateKey = vm.envUint("PRICE_MANAGER_PRIVATE_KEY");
+
+        address payable preGvtAddress = payable(vm.envAddress("PREGVT_ADDRESS"));
+        PreGVT preGVT = PreGVT(preGvtAddress);
+
+        console.log("====================================");
+        console.log("Configuring Presale");
+        console.log("====================================");
+        console.log("Price per token:", PRICE_PER_TOKEN);
+        console.log("Badge required:", BADGE_REQUIRED);
+        console.log("Per user limit:", PER_USER_LIMIT / 1e18, "tokens");
+
+        vm.startBroadcast(priceManagerPrivateKey);
+
+        preGVT.configurePresale(PRICE_PER_TOKEN, BADGE_REQUIRED, PER_USER_LIMIT);
+
+        vm.stopBroadcast();
+
+        console.log("Presale configured!");
+        console.log("====================================");
+    }
+}
+
+/**
+ * @title ActivatePresale
+ * @notice NEW: Activate or deactivate presale
+ * @dev Run with: forge script script/DeployPreGVT.s.sol:ActivatePresale --rpc-url <RPC_URL> --broadcast
+ */
+contract ActivatePresale is Script {
+    address payable PREGVT_ADDRESS;
+    bool constant ACTIVATE = true; // Set to false to deactivate
+
+    function run() external {
+        require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
+
+        uint256 adminPrivateKey = vm.envUint("ADMIN_PRIVATE_KEY");
+
+        PreGVT preGVT = PreGVT(PREGVT_ADDRESS);
+
+        console.log("====================================");
+        console.log(ACTIVATE ? "Activating Presale" : "Deactivating Presale");
+        console.log("====================================");
+
+        vm.startBroadcast(adminPrivateKey);
+
+        preGVT.setPresaleActive(ACTIVATE);
+
+        vm.stopBroadcast();
+
+        console.log("Presale status updated to:", ACTIVATE);
+        console.log("====================================");
+    }
+}
+
+/**
+ * @title UpdatePrice
+ * @notice NEW: Update presale price
+ * @dev Run with: forge script script/DeployPreGVT.s.sol:UpdatePrice --rpc-url <RPC_URL> --broadcast
+ */
+contract UpdatePrice is Script {
+    address payable PREGVT_ADDRESS;
+    uint256 constant NEW_PRICE = 0.02 ether; // UPDATE THIS
+
+    function run() external {
+        require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
+        require(NEW_PRICE > 0, "Update NEW_PRICE");
+
+        uint256 priceManagerPrivateKey = vm.envUint("PRICE_MANAGER_PRIVATE_KEY");
+
+        PreGVT preGVT = PreGVT(PREGVT_ADDRESS);
+
+        console.log("====================================");
+        console.log("Updating Price");
+        console.log("====================================");
+        console.log("New price per token:", NEW_PRICE);
+
+        vm.startBroadcast(priceManagerPrivateKey);
+
+        preGVT.updatePrice(NEW_PRICE);
+
+        vm.stopBroadcast();
+
+        console.log("Price updated!");
+        console.log("====================================");
+    }
+}
+
+/**
+ * @title WithdrawFunds
+ * @notice NEW: Withdraw accumulated ETH to treasury
+ * @dev Run with: forge script script/DeployPreGVT.s.sol:WithdrawFunds --rpc-url <RPC_URL> --broadcast
+ */
+contract WithdrawFunds is Script {
+    address payable PREGVT_ADDRESS;
+
+    function run() external {
+        require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
+
+        uint256 treasuryPrivateKey = vm.envUint("TREASURY_PRIVATE_KEY");
+
+        PreGVT preGVT = PreGVT(PREGVT_ADDRESS);
+
+        console.log("====================================");
+        console.log("Withdrawing Funds");
+        console.log("====================================");
+        console.log("Contract balance:", address(preGVT).balance);
+
+        vm.startBroadcast(treasuryPrivateKey);
+
+        preGVT.withdrawFunds();
+
+        vm.stopBroadcast();
+
+        console.log("Funds withdrawn to treasury!");
+        console.log("====================================");
+    }
+}
+
+/**
  * @title LoadAllocations
  * @notice Load CSV allocations on-chain
  * @dev Run with: forge script script/DeployPreGVT.s.sol:LoadAllocations --rpc-url <RPC_URL> --broadcast
  */
 contract LoadAllocations is Script {
-    address constant PREGVT_ADDRESS = address(0); // UPDATE THIS
+    address payable PREGVT_ADDRESS;
 
     // Batch size for gas optimization (adjust based on network)
     uint256 constant BATCH_SIZE = 100;
@@ -237,7 +416,7 @@ contract LoadAllocations is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:BatchAirdropScript --rpc-url <RPC_URL> --broadcast
  */
 contract BatchAirdropScript is Script {
-    address constant PREGVT_ADDRESS = address(0); // UPDATE THIS
+    address payable PREGVT_ADDRESS;
 
     function run() external {
         require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
@@ -277,32 +456,32 @@ contract BatchAirdropScript is Script {
  * @notice Enable migration to main GVT token
  * @dev Run with: forge script script/DeployPreGVT.s.sol:EnableMigration --rpc-url <RPC_URL> --broadcast
  */
-contract EnableMigration is Script {
-    address constant PREGVT_ADDRESS = address(0); // UPDATE THIS
-    address constant MIGRATOR_ADDRESS = address(0); // UPDATE THIS - after migrator is deployed
+// contract EnableMigration is Script {
+//     address payable PREGVT_ADDRESS ;
+//     address constant MIGRATOR_ADDRESS = vm.envAddress("MIGRATOR_SETTER"); // UPDATE THIS - after migrator is deployed
 
-    function run() external {
-        require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
-        require(MIGRATOR_ADDRESS != address(0), "Update MIGRATOR_ADDRESS");
+//     function run() external {
+//         require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
+//         require(MIGRATOR_ADDRESS != address(0), "Update MIGRATOR_ADDRESS");
 
-        uint256 adminPrivateKey = vm.envUint("ADMIN_PRIVATE_KEY");
+//         uint256 adminPrivateKey = vm.envUint("ADMIN_PRIVATE_KEY");
 
-        PreGVT preGVT = PreGVT(PREGVT_ADDRESS);
+//         PreGVT preGVT = PreGVT(PREGVT_ADDRESS);
 
-        console.log("====================================");
-        console.log("Enabling Migration");
-        console.log("====================================");
-        console.log("PreGVT:", PREGVT_ADDRESS);
-        console.log("Migrator:", MIGRATOR_ADDRESS);
+//         console.log("====================================");
+//         console.log("Enabling Migration");
+//         console.log("====================================");
+//         console.log("PreGVT:", PREGVT_ADDRESS);
+//         console.log("Migrator:", MIGRATOR_ADDRESS);
 
-        vm.startBroadcast(adminPrivateKey);
+//         vm.startBroadcast(adminPrivateKey);
 
-        preGVT.setMigrator(MIGRATOR_ADDRESS);
+//         preGVT.setMigrator(MIGRATOR_ADDRESS);
 
-        vm.stopBroadcast();
+//         vm.stopBroadcast();
 
-        console.log("Migration enabled!");
-        console.log("Users can now call migrateToGVT()");
-        console.log("====================================");
-    }
-}
+//         console.log("Migration enabled!");
+//         console.log("Users can now call migrateToGVT()");
+//         console.log("====================================");
+//     }
+// }
