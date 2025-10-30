@@ -12,6 +12,8 @@ jobs:
   check:
     strategy:
       fail-fast: true
+      matrix:
+        os: [ubuntu-latest]
 
     name: Foundry project
     runs-on: ubuntu-latest
@@ -34,10 +36,23 @@ jobs:
 
       - name: Run Forge build
         run: |
-          forge build --sizes
+          forge build --sizes --skip */test/** */script/**
         id: build
+
+      - name: Run Slither
+        run: |
+          pip install slither-analyzer
+          slither . --checklist --json slither-report.json || echo "Slither found issues (non-blocking)"
+        continue-on-error: true
 
       - name: Run Forge tests
         run: |
           forge test -vvv
         id: test
+
+      - name: Upload Slither report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slither-report
+          path: slither-report.json
