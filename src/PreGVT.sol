@@ -43,6 +43,9 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Maximum tokens that can be sold in presale
     uint256 public immutable presaleSupplyCap;
 
+    /// @notice Treasury address for receiving funds
+    address public immutable treasury;
+
     // ============ Mutable State ============
 
     /// @notice Total tokens minted from airdrop reserve
@@ -66,9 +69,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Whether presale is active
     bool public presaleActive;
 
-    /// @notice Treasury address for receiving funds
-    address public treasury;
-
     /// @notice Whether badge is required for purchasing
     bool public badgeRequiredForPurchase;
 
@@ -90,7 +90,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     event PresaleConfigured(uint256 pricePerToken, bool badgeRequired, uint256 perUserLimit);
     event PresaleStatusChanged(bool active);
     event TokensPurchased(address indexed buyer, uint256 amount, uint256 cost);
-    event TreasurySet(address indexed treasury);
     event PriceUpdated(uint256 newPrice);
     event FundsWithdrawn(address indexed to, uint256 amount);
 
@@ -110,7 +109,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     error PresaleCapExceeded();
     error InsufficientPayment();
     error InvalidPrice();
-    error TreasuryNotSet();
     error PurchaseLimitExceeded();
     error BadgeRequiredForPurchase();
 
@@ -122,6 +120,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      * @param _badgeId ID of the badge required for claims
      * @param _airdropReserveCap Maximum tokens that can be minted from airdrop
      * @param _presaleSupplyCap Maximum tokens that can be sold in presale
+     * @param _treasury Treasury address for receiving funds
      * @param _initialAdmin Address to receive admin role
      */
     constructor(
@@ -129,9 +128,11 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         uint256 _badgeId,
         uint256 _airdropReserveCap,
         uint256 _presaleSupplyCap,
+        address _treasury,
         address _initialAdmin
     ) ERC20("preGVT", "preGVT") {
         if (_badge == address(0)) revert ZeroAddress();
+        if (_treasury == address(0)) revert ZeroAddress();
         if (_initialAdmin == address(0)) revert ZeroAddress();
         if (_airdropReserveCap == 0) revert ZeroAmount();
 
@@ -139,6 +140,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         badgeId = _badgeId;
         airdropReserveCap = _airdropReserveCap;
         presaleSupplyCap = _presaleSupplyCap;
+        treasury = _treasury;
 
         _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
         _grantRole(DISTRIBUTOR_ROLE, _initialAdmin);
@@ -171,6 +173,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      * @notice Check if user has required badge
      * @param user Address to check
      * @return True if user has badge
+     * @dev External call in loop (batchAirdrop) — caller must limit batch size.
      */
     function hasBadge(address user) public view returns (bool) {
         return badge.balanceOf(user, badgeId) > 0;
@@ -251,16 +254,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     }
 
     /**
-     * @notice Set treasury address
-     * @param _treasury Treasury address for receiving funds
-     */
-    function setTreasury(address _treasury) external onlyRole(TREASURY_ROLE) {
-        if (_treasury == address(0)) revert ZeroAddress();
-        treasury = _treasury;
-        emit TreasurySet(_treasury);
-    }
-
-    /**
      * @notice Enable or disable presale
      * @param _active Whether presale should be active
      */
@@ -273,10 +266,8 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      * @notice Withdraw accumulated funds to treasury
      */
     function withdrawFunds() external onlyRole(TREASURY_ROLE) nonReentrant {
-        if (treasury == address(0)) revert TreasuryNotSet();
-
         uint256 balance = address(this).balance;
-        if (balance == 0) revert ZeroAmount();
+        if (balance == 0) return; // ← Medium Fixed: No revert on zero balance
 
         (bool success,) = treasury.call{value: balance}("");
         require(success, "Transfer failed");
