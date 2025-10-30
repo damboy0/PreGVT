@@ -55,7 +55,6 @@ contract PreGVTTest is Test {
     uint256 public constant AIRDROP_RESERVE_CAP = 1_000_000e18; // 1M tokens
     uint256 public constant PRESALE_RESERVE_CAP = 1_000_000e18; // 1M tokens
 
-
     event AirdropReserveDefined(uint256 cap);
     event AirdropDistributed(address indexed to, uint256 amount, uint256 newTotalMinted);
     event BatchAirdrop(uint256 indexed count, uint256 totalAmount);
@@ -70,7 +69,7 @@ contract PreGVTTest is Test {
 
         // Deploy PreGVT
         vm.prank(admin);
-        preGVT = new PreGVT(address(badge), BADGE_ID, AIRDROP_RESERVE_CAP,PRESALE_RESERVE_CAP, admin);
+        preGVT = new PreGVT(address(badge), BADGE_ID, AIRDROP_RESERVE_CAP, PRESALE_RESERVE_CAP, admin);
 
         // Set PreGVT as operator on badge
         badge.setOperator(address(preGVT), true);
