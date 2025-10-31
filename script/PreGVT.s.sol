@@ -79,6 +79,7 @@ contract DeployPreGVT is Script {
             RESERVE_CAP,
             PRESALE_CAP, // NEW
             TREASURY,
+            USDT_ADDRESS,
             INITIAL_ADMIN
         );
 
@@ -179,9 +180,9 @@ contract DeployPreGVT is Script {
  */
 contract SetupPreGVT is Script {
     // Update these after deployment
-    address payable PREGVT_ADDRESS = payable(0x5FbDB2315678afecb367f032d93F642f64180aa3); // UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0xC3f17080095f5242F4B996A928c0C795291fdc80); // UPDATE THIS
     address BADGE_ADDRESS = 0xd1215311b1CabDb911BCaAAc2ebcB291C7659cdc; // UPDATE THIS
-    address payable TREASURY_ADDRESS = payable(0x91935e2e959fb504640280C08530156c67F89479);
+    address TREASURY_ADDRESS = 0x00292a53E10E6E5e4A66E4F6Ac8535b8CaB33142; // UPDATE THIS
 
     function run() external {
         require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
@@ -196,12 +197,8 @@ contract SetupPreGVT is Script {
 
         vm.startBroadcast(adminPrivateKey);
 
-        address payable preGvtAddress = payable(0x5FbDB2315678afecb367f032d93F642f64180aa3);
+        address payable preGvtAddress = payable(0xC3f17080095f5242F4B996A928c0C795291fdc80);
         PreGVT preGVT = PreGVT(preGvtAddress);
-
-        // NEW: Set treasury
-        preGVT.setTreasury(TREASURY_ADDRESS);
-        console.log("Treasury set to:", TREASURY_ADDRESS);
 
         // Unpause if needed
         if (preGVT.paused()) {
@@ -222,10 +219,10 @@ contract SetupPreGVT is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:ConfigurePresale --rpc-url <RPC_URL> --broadcast
  */
 contract ConfigurePresale is Script {
-    address payable PREGVT_ADDRESS = payable(0x00292a53E10E6E5e4A66E4F6Ac8535b8CaB33142); // UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0xC3f17080095f5242F4B996A928c0C795291fdc80); // UPDATE THIS
 
     // Presale configuration - UPDATE THESE
-    uint256 constant PRICE_PER_TOKEN = 0.01 ether; // 0.01 ETH per token
+    uint256 constant PRICE_PER_TOKEN = 5e15; // 0.01 BUSDT per token
     bool constant BADGE_REQUIRED = false; // Set to true if badge holders only
     uint256 constant PER_USER_LIMIT = 0; // 10,000 tokens per user (0 = no limit)
 
@@ -293,8 +290,8 @@ contract ActivatePresale is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:UpdatePrice --rpc-url <RPC_URL> --broadcast
  */
 contract UpdatePrice is Script {
-    address payable PREGVT_ADDRESS;
-    uint256 constant NEW_PRICE = 0.005; // UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0x00292a53E10E6E5e4A66E4F6Ac8535b8CaB33142); // UPDATE
+    uint256 constant NEW_PRICE = 5e15; // 0.005 BUSDT per token (18 decimals)
 
     function run() external {
         require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -28,6 +29,8 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     bytes32 public constant MIGRATOR_SETTER_ROLE = keccak256("MIGRATOR_SETTER_ROLE");
     bytes32 public constant PRICE_MANAGER_ROLE = keccak256("PRICE_MANAGER_ROLE");
     bytes32 public constant TREASURY_ROLE = keccak256("TREASURY_ROLE");
+
+    using SafeERC20 for IERC20;
 
     // ============ Immutable State ============
 
@@ -368,15 +371,13 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         uint256 cost = calculateCost(amount);
         if (cost == 0) revert ZeroAmount();
 
-        // Transfer payment tokens from user to contract
-        bool success = paymentToken.transferFrom(msg.sender, treasury, cost);
-        if (!success) revert PaymentTransferFailed();
+        // Safe transfer for BUSD/USDT compatibility
+        IERC20(paymentToken).safeTransferFrom(msg.sender, treasury, cost);
 
         // Update state
         presaleSold += amount;
         userPurchases[msg.sender] += amount;
 
-        // Mint tokens
         _mint(msg.sender, amount);
 
         emit TokensPurchased(msg.sender, amount, cost);
