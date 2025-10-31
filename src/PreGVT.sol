@@ -43,6 +43,9 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Maximum tokens that can be sold in presale
     uint256 public immutable presaleSupplyCap;
 
+    /// @notice Payment token (USDT) address
+    IERC20 public immutable paymentToken;
+
     /// @notice Treasury address for receiving funds
     address public immutable treasury;
 
@@ -111,6 +114,10 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     error InvalidPrice();
     error PurchaseLimitExceeded();
     error BadgeRequiredForPurchase();
+    error TreasuryNotSet();
+    // error PurchaseLimitExceeded();
+    // error BadgeRequiredForPurchase();
+    error PaymentTransferFailed();
 
     // ============ Constructor ============
 
@@ -129,10 +136,12 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         uint256 _airdropReserveCap,
         uint256 _presaleSupplyCap,
         address _treasury,
+        address _paymentToken,
         address _initialAdmin
     ) ERC20("preGVT", "preGVT") {
         if (_badge == address(0)) revert ZeroAddress();
-        if (_treasury == address(0)) revert ZeroAddress();
+        if (_paymentToken == address(0)) revert ZeroAddress();
+        // if (_treasury == address(0)) revert ZeroAddress();
         if (_initialAdmin == address(0)) revert ZeroAddress();
         if (_airdropReserveCap == 0) revert ZeroAmount();
 
@@ -141,6 +150,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         airdropReserveCap = _airdropReserveCap;
         presaleSupplyCap = _presaleSupplyCap;
         treasury = _treasury;
+        paymentToken = IERC20(_paymentToken);
 
         _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
         _grantRole(DISTRIBUTOR_ROLE, _initialAdmin);
@@ -194,7 +204,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      * @return cost Total cost in wei
      */
     function calculateCost(uint256 amount) public view returns (uint256 cost) {
-        return amount * pricePerToken;
+        return amount * pricePerToken / 1e18;
     }
 
     /**
@@ -266,11 +276,13 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      * @notice Withdraw accumulated funds to treasury
      */
     function withdrawFunds() external onlyRole(TREASURY_ROLE) nonReentrant {
-        uint256 balance = address(this).balance;
-        if (balance == 0) return; // ← Medium Fixed: No revert on zero balance
+        if (treasury == address(0)) revert TreasuryNotSet();
+        
+        uint256 balance = paymentToken.balanceOf(address(this));
+        if (balance == 0) revert ZeroAmount();
 
-        (bool success,) = treasury.call{value: balance}("");
-        require(success, "Transfer failed");
+        bool success = paymentToken.transfer(treasury, balance);
+        if (!success) revert PaymentTransferFailed();
 
         emit FundsWithdrawn(treasury, balance);
     }
@@ -334,10 +346,10 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     // ============ User Functions ============
 
     /**
-     * @notice Buy tokens at presale price
+     * @notice Buy tokens at presale price using USDT
      * @param amount Number of tokens to purchase
      */
-    function buy(uint256 amount) external payable whenNotPaused nonReentrant {
+    function buy(uint256 amount) external whenNotPaused nonReentrant {
         if (!presaleActive) revert PresaleNotActive();
         if (amount == 0) revert ZeroAmount();
         if (badgeRequiredForPurchase && !hasBadge(msg.sender)) revert BadgeRequiredForPurchase();
@@ -352,9 +364,13 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
             }
         }
 
-        // Calculate and verify payment
+        // Calculate cost
         uint256 cost = calculateCost(amount);
-        if (msg.value < cost) revert InsufficientPayment();
+        if (cost == 0) revert ZeroAmount();
+
+        // Transfer payment tokens from user to contract
+        bool success = paymentToken.transferFrom(msg.sender, treasury, cost);
+        if (!success) revert PaymentTransferFailed();
 
         // Update state
         presaleSold += amount;
@@ -362,12 +378,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
 
         // Mint tokens
         _mint(msg.sender, amount);
-
-        // Refund excess payment
-        if (msg.value > cost) {
-            (bool success,) = msg.sender.call{value: msg.value - cost}("");
-            require(success, "Refund failed");
-        }
 
         emit TokensPurchased(msg.sender, amount, cost);
     }
@@ -485,8 +495,5 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         revert ApprovalNotAllowed();
     }
 
-    /**
-     * @notice Allow contract to receive ETH
-     */
-    receive() external payable {}
+    
 }
