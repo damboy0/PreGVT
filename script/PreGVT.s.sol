@@ -226,7 +226,7 @@ contract ConfigurePresale is Script {
     address payable PREGVT_ADDRESS = payable(0x00292a53E10E6E5e4A66E4F6Ac8535b8CaB33142); // UPDATE THIS
 
     // Presale configuration - UPDATE THESE
-    uint256 constant PRICE_PER_TOKEN = 0.005 * 1e18; // 0.005 USDT per token (add 18 decimals)
+    uint256 constant PRICE_PER_TOKEN = 5000; // 0.005 USDT per token (add 18 decimals)
     bool constant BADGE_REQUIRED = false; // Set to true if badge holders only
     uint256 constant PER_USER_LIMIT = 0; // 10,000 tokens per user (0 = no limit)
 
