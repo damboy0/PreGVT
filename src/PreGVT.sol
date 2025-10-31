@@ -277,7 +277,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      */
     function withdrawFunds() external onlyRole(TREASURY_ROLE) nonReentrant {
         if (treasury == address(0)) revert TreasuryNotSet();
-        
+
         uint256 balance = paymentToken.balanceOf(address(this));
         if (balance == 0) revert ZeroAmount();
 
@@ -494,6 +494,4 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     function decreaseAllowance(address, uint256) public pure returns (bool) {
         revert ApprovalNotAllowed();
     }
-
-    
 }

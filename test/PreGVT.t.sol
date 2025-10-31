@@ -68,7 +68,15 @@ contract PreGVTTest is Test {
         badge = new MockGenesisBadge();
 
         vm.prank(admin);
-        preGVT = new PreGVT(address(badge), BADGE_ID, AIRDROP_RESERVE_CAP, PRESALE_SUPPLY_CAP, treasury,0x55d398326f99059fF775485246999027B3197955, admin);
+        preGVT = new PreGVT(
+            address(badge),
+            BADGE_ID,
+            AIRDROP_RESERVE_CAP,
+            PRESALE_SUPPLY_CAP,
+            treasury,
+            0x55d398326f99059fF775485246999027B3197955,
+            admin
+        );
 
         badge.setOperator(address(preGVT), true);
 
