@@ -23,14 +23,15 @@ interface IGenesisBadge1155 {
  * @dev Implements formal airdrop reserve with badge-gated claims and public presale
  */
 contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
+
+    using SafeERC20 for IERC20;
+
     // ============ Roles ============
 
     bytes32 public constant DISTRIBUTOR_ROLE = keccak256("DISTRIBUTOR_ROLE");
     bytes32 public constant MIGRATOR_SETTER_ROLE = keccak256("MIGRATOR_SETTER_ROLE");
     bytes32 public constant PRICE_MANAGER_ROLE = keccak256("PRICE_MANAGER_ROLE");
     bytes32 public constant TREASURY_ROLE = keccak256("TREASURY_ROLE");
-
-    using SafeERC20 for IERC20;
 
     // ============ Immutable State ============
 
