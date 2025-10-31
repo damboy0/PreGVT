@@ -13,4 +13,6 @@ docs/
 # Dotenv file
 .env
 
+api.json
+
 slither-env/
