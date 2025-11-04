@@ -369,7 +369,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         if (cost == 0) revert ZeroAmount();
 
         // Transfer payment tokens from user to contract
-        bool success = paymentToken.transferFrom(msg.sender, treasury, cost);
+        bool success = paymentToken.transferFrom(msg.sender, address(this), cost);
         if (!success) revert PaymentTransferFailed();
 
         // Update state

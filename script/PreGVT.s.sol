@@ -223,10 +223,10 @@ contract SetupPreGVT is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:ConfigurePresale --rpc-url <RPC_URL> --broadcast
  */
 contract ConfigurePresale is Script {
-    address payable PREGVT_ADDRESS = payable(0x00292a53E10E6E5e4A66E4F6Ac8535b8CaB33142); // UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0xD1a8c66b132e63d2A1381F2D1000c3799569f3A4); // UPDATE THIS
 
     // Presale configuration - UPDATE THESE
-    uint256 constant PRICE_PER_TOKEN = 5000; // 0.005 USDT per token (add 18 decimals)
+    uint256 constant PRICE_PER_TOKEN = 5e16; // 0.005 USDT per token (add 18 decimals)
     bool constant BADGE_REQUIRED = false; // Set to true if badge holders only
     uint256 constant PER_USER_LIMIT = 0; // 10,000 tokens per user (0 = no limit)
 
@@ -263,7 +263,7 @@ contract ConfigurePresale is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:ActivatePresale --rpc-url <RPC_URL> --broadcast
  */
 contract ActivatePresale is Script {
-    address payable PREGVT_ADDRESS = payable(0x00292a53E10E6E5e4A66E4F6Ac8535b8CaB33142); // UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0xD1a8c66b132e63d2A1381F2D1000c3799569f3A4); // UPDATE THIS
     bool constant ACTIVATE = true; // Set to false to deactivate
 
     function run() external {
