@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
-import "../src/Staking.sol";
+import "../src/PreGVTStaking.sol";
 
 /**
  * @title DeployPreGVTStaking

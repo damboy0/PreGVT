@@ -38,12 +38,11 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
         uint256 startTime; // Stake start timestamp
         uint256 lockEndTime; // Lock end timestamp (startTime + MIN_LOCK_PERIOD)
         uint256 lastRewardTime; // Last reward calculation timestamp
-        uint256 accruedRewards; // Accumulated rewards not yet claimed
         bool active; // Position active status
     }
 
     struct EpochConfig {
-        uint256 emissionRate; // Rewards per second for this epoch
+        uint256 emissionRate; // Rewards per second for this epoch (scaled by 1e18)
         uint256 startTime; // Epoch start time
         uint256 endTime; // Epoch end time
     }
@@ -78,7 +77,7 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
     /// @notice Global reward cap
     uint256 public globalRewardCap;
 
-    /// @notice Total rewards minted/accrued
+    /// @notice Total rewards minted/accrued (tracked at accrual time)
     uint256 public totalRewardsMinted;
 
     /// @notice Next position ID
@@ -179,7 +178,6 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
             startTime: block.timestamp,
             lockEndTime: lockEndTime,
             lastRewardTime: block.timestamp,
-            accruedRewards: 0,
             active: true
         });
 
@@ -306,14 +304,26 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
             }
 
             address owner = positionOwner[positionId];
-            position.accruedRewards += pendingReward;
             pendingRggp[owner] += pendingReward;
             totalRewardsMinted += pendingReward;
 
             emit RewardsAccrued(owner, positionId, pendingReward);
         }
 
-        position.lastRewardTime = block.timestamp;
+        // Bound lastRewardTime to the active epoch window
+        EpochConfig memory epoch = epochs[currentEpochId];
+        if (epoch.emissionRate == 0) {
+            position.lastRewardTime = block.timestamp;
+        } else {
+            uint256 toBound = block.timestamp;
+            if (epoch.endTime < toBound) {
+                toBound = epoch.endTime;
+            }
+            if (toBound < epoch.startTime) {
+                toBound = epoch.startTime;
+            }
+            position.lastRewardTime = toBound;
+        }
     }
 
     /**
@@ -325,12 +335,21 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
         StakePosition memory position = positions[positionId];
         if (!position.active) return 0;
 
-        uint256 timeElapsed = block.timestamp - position.lastRewardTime;
-        if (timeElapsed == 0) return 0;
-
         // Get current epoch emission rate
         EpochConfig memory epoch = epochs[currentEpochId];
         if (epoch.emissionRate == 0) return 0;
+
+        // Determine accrual window within the epoch
+        uint256 from = position.lastRewardTime;
+        uint256 to = block.timestamp;
+
+        // Bound to epoch window
+        if (from < epoch.startTime) from = epoch.startTime;
+        if (to > epoch.endTime) to = epoch.endTime;
+
+        if (to <= from) return 0;
+
+        uint256 timeElapsed = to - from;
 
         // Base rewards
         uint256 baseReward = (position.amount * epoch.emissionRate * timeElapsed) / 1e18;
@@ -366,6 +385,25 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
             }
         }
 
+        return total;
+    }
+
+    /**
+     * @notice Returns a user's total live rewards
+     * @dev Includes stored (pendingRggp) + unaccrued rewards from active positions at this moment
+     * @param user User address
+     * @return total rewards claimable right now
+     */
+    function getLiveRewards(address user) external view returns (uint256) {
+        uint256 total = pendingRggp[user];
+        uint256[] memory positionsOfUser = userPositions[user];
+
+        for (uint256 i = 0; i < positionsOfUser.length; i++) {
+            uint256 pid = positionsOfUser[i];
+            if (positions[pid].active) {
+                total += calculateRewards(pid);
+            }
+        }
         return total;
     }
 

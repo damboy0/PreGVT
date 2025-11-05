@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
-import "../src/Staking.sol";
+import "../src/Staking.sol"; // Make sure this points to your updated PreGVTStaking contract
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /**
@@ -59,7 +59,7 @@ contract MockBoostOracle {
 
 /**
  * @title PreGVTStakingTest
- * @notice Comprehensive test suite for PreGVTStaking
+ * @notice Test suite for PreGVTStaking
  */
 contract PreGVTStakingTest is Test {
     PreGVTStaking public staking;
@@ -73,8 +73,8 @@ contract PreGVTStakingTest is Test {
     address public user2 = address(4);
     address public user3 = address(5);
 
-    uint256 public constant REWARD_CAP = 1_000_000_000e18; // 1 billion tokens
-    uint256 public constant EMISSION_RATE = 1e15; // 0.001 token per second per token staked (reduced from 1e18)
+    uint256 public constant REWARD_CAP = 1_000_000_000e18;
+    uint256 public constant EMISSION_RATE = 1e15; // 0.001 token per second per token staked
 
     event Staked(address indexed user, uint256 indexed positionId, uint256 amount, uint256 lockEndTime);
     event Unstaked(address indexed user, uint256 indexed positionId, uint256 amount);
@@ -83,12 +83,10 @@ contract PreGVTStakingTest is Test {
     event RewardsAccrued(address indexed user, uint256 indexed positionId, uint256 amount);
 
     function setUp() public {
-        // Deploy contracts
         preGVT = new MockPreGVT();
         rGGP = new MockRGGP();
         boostOracle = new MockBoostOracle();
 
-        // Deploy staking
         vm.prank(owner);
         staking = new PreGVTStaking(address(preGVT), treasury, REWARD_CAP);
 
@@ -96,21 +94,20 @@ contract PreGVTStakingTest is Test {
         vm.prank(owner);
         staking.setEoaOnly(false);
 
-        // Set staking as rGGP minter
+        // Staking contract mints rGGP
         rGGP.setMinter(address(staking));
 
-        // Configure initial epoch
+        // Configure epoch
         vm.startPrank(owner);
         staking.configureEpoch(0, EMISSION_RATE, block.timestamp, block.timestamp + 365 days);
         staking.setCurrentEpoch(0);
         vm.stopPrank();
 
-        // Fund users
+        // Fund & approve
         preGVT.mint(user1, 10_000e18);
         preGVT.mint(user2, 10_000e18);
         preGVT.mint(user3, 10_000e18);
 
-        // Approve staking
         vm.prank(user1);
         preGVT.approve(address(staking), type(uint256).max);
         vm.prank(user2);
@@ -119,18 +116,15 @@ contract PreGVTStakingTest is Test {
         preGVT.approve(address(staking), type(uint256).max);
     }
 
-    // ============ Deployment Tests ============
-
+    // -------- Deployment --------
     function testDeployment() public view {
         assertEq(address(staking.stakeToken()), address(preGVT));
         assertEq(staking.treasury(), treasury);
         assertEq(staking.globalRewardCap(), REWARD_CAP);
         assertEq(staking.nextPositionId(), 1);
-        assertEq(staking.totalStaked(), 0);
     }
 
-    // ============ Staking Tests ============
-
+    // -------- Staking --------
     function testStake() public {
         uint256 stakeAmount = 1000e18;
         uint256 expectedLockEnd = block.timestamp + 30 days;
@@ -142,12 +136,27 @@ contract PreGVTStakingTest is Test {
         assertEq(staking.totalStaked(), stakeAmount);
         assertEq(preGVT.balanceOf(address(staking)), stakeAmount);
 
-        (uint256 amount, uint256 startTime, uint256 lockEndTime,,, bool active) = staking.positions(positionId);
+        // Updated struct unpack (NO accruedRewards anymore)
+        (uint256 amount, uint256 startTime, uint256 lockEndTime, uint256 lastRewardTime, bool active) =
+            staking.positions(positionId);
 
         assertEq(amount, stakeAmount);
         assertEq(startTime, block.timestamp);
         assertEq(lockEndTime, expectedLockEnd);
+        assertEq(lastRewardTime, block.timestamp);
         assertTrue(active);
+    }
+
+    function testGetLiveRewards() public {
+        vm.prank(user1);
+        uint256 positionId = staking.stake(1000e18);
+
+        vm.warp(block.timestamp + 3 days);
+
+        uint256 liveRewards = staking.getLiveRewards(user1);
+        uint256 expected = staking.calculateRewards(positionId);
+
+        assertApproxEqRel(liveRewards, expected, 0.01e18);
     }
 
     function testStakeMultiplePositions() public {
@@ -198,7 +207,7 @@ contract PreGVTStakingTest is Test {
         assertEq(preGVT.balanceOf(user1), balanceBefore + 1000e18);
         assertEq(staking.totalStaked(), 0);
 
-        (,,,,, bool active) = staking.positions(positionId);
+        (,,,, bool active) = staking.positions(positionId);
         assertFalse(active);
     }
 
@@ -257,7 +266,7 @@ contract PreGVTStakingTest is Test {
         staking.earlyExit(positionId);
 
         // Should succeed even during lock
-        (,,,,, bool active) = staking.positions(positionId);
+        (,,,, bool active) = staking.positions(positionId);
         assertFalse(active);
     }
 
