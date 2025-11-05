@@ -111,10 +111,13 @@ contract DeployPreGVTStaking is Script {
  * @dev Run with: forge script script/DeployStaking.s.sol:SetRewardToken --rpc-url <RPC_URL> --broadcast
  */
 contract SetRewardToken is Script {
-    address constant STAKING_ADDRESS = address(0); // UPDATE THIS
-    address constant RGGP_ADDRESS = address(0); // UPDATE THIS
+    address STAKING_ADDRESS; // UPDATE THIS
+    address RGGP_ADDRESS; // UPDATE THIS
 
     function run() external {
+        STAKING_ADDRESS = vm.envAddress("STAKING_ADDRESS");
+        RGGP_ADDRESS = vm.envAddress("RGGP_ADDRESS");
+
         require(STAKING_ADDRESS != address(0), "Update STAKING_ADDRESS");
         require(RGGP_ADDRESS != address(0), "Update RGGP_ADDRESS");
 
@@ -145,7 +148,7 @@ contract SetRewardToken is Script {
  * @dev Run with: forge script script/DeployStaking.s.sol:ConfigureNextEpoch --rpc-url <RPC_URL> --broadcast
  */
 contract ConfigureNextEpoch is Script {
-    address constant STAKING_ADDRESS = address(0); // UPDATE THIS
+    address STAKING_ADDRESS; // UPDATE THIS
 
     // New epoch configuration
     uint256 constant EPOCH_ID = 1; // UPDATE THIS
@@ -154,6 +157,8 @@ contract ConfigureNextEpoch is Script {
     uint256 constant EPOCH_DURATION = 90 days;
 
     function run() external {
+        STAKING_ADDRESS = vm.envAddress("STAKING_ADDRESS");
+
         require(STAKING_ADDRESS != address(0), "Update STAKING_ADDRESS");
         require(EPOCH_START > 0, "Update EPOCH_START");
 
@@ -189,10 +194,12 @@ contract ConfigureNextEpoch is Script {
  * @dev Run with: forge script script/DeployStaking.s.sol:ActivateEpoch --rpc-url <RPC_URL> --broadcast
  */
 contract ActivateEpoch is Script {
-    address constant STAKING_ADDRESS = address(0); // UPDATE THIS
+    address STAKING_ADDRESS; // UPDATE THIS
     uint256 constant EPOCH_ID = 1; // UPDATE THIS
 
     function run() external {
+        STAKING_ADDRESS = vm.envAddress("STAKING_ADDRESS");
+
         require(STAKING_ADDRESS != address(0), "Update STAKING_ADDRESS");
 
         uint256 ownerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -219,9 +226,11 @@ contract ActivateEpoch is Script {
  * @dev Run with: forge script script/DeployStaking.s.sol:EmergencyPause --rpc-url <RPC_URL> --broadcast
  */
 contract EmergencyPause is Script {
-    address constant STAKING_ADDRESS = address(0); // UPDATE THIS
+    address STAKING_ADDRESS; // UPDATE THIS
 
     function run() external {
+        STAKING_ADDRESS = vm.envAddress("STAKING_ADDRESS");
+
         require(STAKING_ADDRESS != address(0), "Update STAKING_ADDRESS");
 
         uint256 ownerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -249,9 +258,11 @@ contract EmergencyPause is Script {
  * @dev Run with: forge script script/DeployStaking.s.sol:Unpause --rpc-url <RPC_URL> --broadcast
  */
 contract Unpause is Script {
-    address constant STAKING_ADDRESS = address(0); // UPDATE THIS
+    address STAKING_ADDRESS; // UPDATE THIS
 
     function run() external {
+        STAKING_ADDRESS = vm.envAddress("STAKING_ADDRESS");
+
         require(STAKING_ADDRESS != address(0), "Update STAKING_ADDRESS");
 
         uint256 ownerPrivateKey = vm.envUint("PRIVATE_KEY");
@@ -279,9 +290,11 @@ contract Unpause is Script {
  * @dev Run with: forge script script/DeployStaking.s.sol:ViewStakingStats --rpc-url <RPC_URL>
  */
 contract ViewStakingStats is Script {
-    address constant STAKING_ADDRESS = address(0); // UPDATE THIS
+    address STAKING_ADDRESS; // UPDATE THIS
 
-    function run() external view {
+    function run() external {
+        STAKING_ADDRESS = vm.envAddress("STAKING_ADDRESS");
+
         require(STAKING_ADDRESS != address(0), "Update STAKING_ADDRESS");
 
         PreGVTStaking staking = PreGVTStaking(STAKING_ADDRESS);
