@@ -26,7 +26,7 @@ interface INFTBoostOracle {
 /**
  * @title PreGVTStaking
  * @notice Staking contract for preGVT with rGGP rewards
- * @dev Supports pre-launch reward tracking and post-launch claiming
+ * @dev Supports pre-launch reward tracking and post-launch claiming with custom lock durations
  */
 contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -36,7 +36,8 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
     struct StakePosition {
         uint256 amount; // Amount of preGVT staked
         uint256 startTime; // Stake start timestamp
-        uint256 lockEndTime; // Lock end timestamp (startTime + MIN_LOCK_PERIOD)
+        uint256 lockDuration; // Lock duration in seconds
+        uint256 lockEndTime; // Lock end timestamp (startTime + lockDuration)
         uint256 lastRewardTime; // Last reward calculation timestamp
         uint256 accruedRewards; // Accumulated rewards not yet claimed
         bool active; // Position active status
@@ -51,9 +52,17 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
     // ============ Constants ============
 
     uint256 public constant MIN_LOCK_PERIOD = 30 days;
+    uint256 public constant MAX_LOCK_PERIOD = 730 days; // 2 years
     uint256 public constant EARLY_EXIT_PENALTY_BPS = 1000; // 10%
     uint256 public constant BASIS_POINTS = 10000;
     uint256 public constant BOOST_BASE = 100; // 100% = no boost, 150% = 1.5x
+
+    // Lock duration tiers for bonus multipliers
+    uint256 public constant TIER_1_DURATION = 30 days; // 1.0x (base)
+    uint256 public constant TIER_2_DURATION = 90 days; // 1.1x
+    uint256 public constant TIER_3_DURATION = 180 days; // 1.25x
+    uint256 public constant TIER_4_DURATION = 365 days; // 1.5x
+    uint256 public constant TIER_5_DURATION = 730 days; // 2.0x
 
     // ============ State Variables ============
 
@@ -71,6 +80,9 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
 
     /// @notice Reward distribution active flag
     bool public rewardActive;
+
+    /// @notice Enable lock duration bonuses
+    bool public lockBonusEnabled = true;
 
     /// @notice Total staked amount
     uint256 public totalStaked;
@@ -107,7 +119,14 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
 
     // ============ Events ============
 
-    event Staked(address indexed user, uint256 indexed positionId, uint256 amount, uint256 lockEndTime);
+    event Staked(
+        address indexed user,
+        uint256 indexed positionId,
+        uint256 amount,
+        uint256 lockDuration,
+        uint256 lockEndTime,
+        uint256 lockBonus
+    );
     event Unstaked(address indexed user, uint256 indexed positionId, uint256 amount);
     event EarlyExit(address indexed user, uint256 indexed positionId, uint256 amount, uint256 penalty);
     event RewardsClaimed(address indexed user, uint256 amount);
@@ -117,12 +136,14 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
     event TreasuryUpdated(address indexed oldTreasury, address indexed newTreasury);
     event BoostOracleUpdated(address indexed boostOracle);
     event GlobalRewardCapUpdated(uint256 newCap);
+    event LockBonusToggled(bool enabled);
 
     // ============ Errors ============
 
     error OnlyEOA();
     error InvalidAmount();
     error InvalidAddress();
+    error InvalidLockDuration();
     error PositionNotFound();
     error PositionNotActive();
     error NotPositionOwner();
@@ -163,20 +184,31 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
     // ============ Staking Functions ============
 
     /**
-     * @notice Stake preGVT tokens
+     * @notice Stake preGVT tokens with custom lock duration
      * @param amount Amount to stake
+     * @param lockDuration Lock duration in seconds (minimum MIN_LOCK_PERIOD)
      * @return positionId Created position ID
      */
-    function stake(uint256 amount) external whenNotPaused nonReentrant onlyEOA returns (uint256 positionId) {
+    function stake(uint256 amount, uint256 lockDuration)
+        external
+        whenNotPaused
+        nonReentrant
+        onlyEOA
+        returns (uint256 positionId)
+    {
         if (amount == 0) revert InvalidAmount();
+        if (lockDuration < MIN_LOCK_PERIOD || lockDuration > MAX_LOCK_PERIOD) {
+            revert InvalidLockDuration();
+        }
 
         positionId = nextPositionId++;
 
-        uint256 lockEndTime = block.timestamp + MIN_LOCK_PERIOD;
+        uint256 lockEndTime = block.timestamp + lockDuration;
 
         positions[positionId] = StakePosition({
             amount: amount,
             startTime: block.timestamp,
+            lockDuration: lockDuration,
             lockEndTime: lockEndTime,
             lastRewardTime: block.timestamp,
             accruedRewards: 0,
@@ -190,7 +222,9 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
 
         stakeToken.safeTransferFrom(msg.sender, address(this), amount);
 
-        emit Staked(msg.sender, positionId, amount, lockEndTime);
+        uint256 lockBonus = getLockDurationBonus(lockDuration);
+
+        emit Staked(msg.sender, positionId, amount, lockDuration, lockEndTime, lockBonus);
     }
 
     /**
@@ -335,18 +369,37 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
         // Base rewards
         uint256 baseReward = (position.amount * epoch.emissionRate * timeElapsed) / 1e18;
 
-        // Apply boost if oracle is set
-        uint256 boost = BOOST_BASE;
+        // Apply lock duration bonus if enabled
+        if (lockBonusEnabled) {
+            uint256 lockBonus = getLockDurationBonus(position.lockDuration);
+            baseReward = (baseReward * lockBonus) / 100;
+        }
+
+        // Apply NFT boost if oracle is set
+        uint256 nftBoost = BOOST_BASE;
         if (address(boostOracle) != address(0)) {
             try boostOracle.getBoostMultiplier(positionOwner[positionId]) returns (uint256 multiplier) {
-                boost = multiplier;
+                nftBoost = multiplier;
             } catch {
                 // Fallback to base if oracle fails
-                boost = BOOST_BASE;
+                nftBoost = BOOST_BASE;
             }
         }
 
-        return (baseReward * boost) / BOOST_BASE;
+        return (baseReward * nftBoost) / BOOST_BASE;
+    }
+
+    /**
+     * @notice Get lock duration bonus multiplier
+     * @param lockDuration Lock duration in seconds
+     * @return Bonus multiplier (100 = 1.0x, 200 = 2.0x)
+     */
+    function getLockDurationBonus(uint256 lockDuration) public pure returns (uint256) {
+        if (lockDuration >= TIER_5_DURATION) return 200; // 2.0x
+        if (lockDuration >= TIER_4_DURATION) return 150; // 1.5x
+        if (lockDuration >= TIER_3_DURATION) return 125; // 1.25x
+        if (lockDuration >= TIER_2_DURATION) return 110; // 1.1x
+        return 100; // 1.0x base
     }
 
     // ============ View Functions ============
@@ -407,6 +460,27 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
         return position.lockEndTime - block.timestamp;
     }
 
+    /**
+     * @notice Calculate potential rewards for given parameters
+     * @param amount Stake amount
+     * @param lockDuration Lock duration
+     * @param duration Calculation duration
+     * @return Estimated rewards
+     */
+    function estimateRewards(uint256 amount, uint256 lockDuration, uint256 duration) external view returns (uint256) {
+        EpochConfig memory epoch = epochs[currentEpochId];
+        if (epoch.emissionRate == 0) return 0;
+
+        uint256 baseReward = (amount * epoch.emissionRate * duration) / 1e18;
+
+        if (lockBonusEnabled) {
+            uint256 lockBonus = getLockDurationBonus(lockDuration);
+            baseReward = (baseReward * lockBonus) / 100;
+        }
+
+        return baseReward;
+    }
+
     // ============ Admin Functions ============
 
     /**
@@ -464,6 +538,7 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
 
     /**
      * @notice Set boost oracle
+     *
      * @param _boostOracle Boost oracle address
      */
     function setBoostOracle(address _boostOracle) external onlyOwner {
@@ -478,6 +553,15 @@ contract PreGVTStaking is Ownable(msg.sender), Pausable, ReentrancyGuard {
     function setGlobalRewardCap(uint256 _newCap) external onlyOwner {
         globalRewardCap = _newCap;
         emit GlobalRewardCapUpdated(_newCap);
+    }
+
+    /**
+     * @notice Toggle lock duration bonus
+     * @param _enabled Enable/disable lock bonus
+     */
+    function setLockBonusEnabled(bool _enabled) external onlyOwner {
+        lockBonusEnabled = _enabled;
+        emit LockBonusToggled(_enabled);
     }
 
     /**
