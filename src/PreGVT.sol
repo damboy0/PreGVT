@@ -28,6 +28,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     bytes32 public constant MIGRATOR_SETTER_ROLE = keccak256("MIGRATOR_SETTER_ROLE");
     bytes32 public constant PRICE_MANAGER_ROLE = keccak256("PRICE_MANAGER_ROLE");
     bytes32 public constant TREASURY_ROLE = keccak256("TREASURY_ROLE");
+    bytes32 public constant WHITELIST_MANAGER_ROLE = keccak256("WHITELIST_MANAGER_ROLE");
 
     // ============ Immutable State ============
 
@@ -81,6 +82,9 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Track user purchases for limit enforcement
     mapping(address => uint256) public userPurchases;
 
+    /// @notice Whitelisted contracts that can receive transfers (e.g., staking contracts)
+    mapping(address => bool) public whitelistedContracts;
+
     // ============ Events ============
 
     event AirdropReserveDefined(uint256 cap);
@@ -95,6 +99,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     event TokensPurchased(address indexed buyer, uint256 amount, uint256 cost);
     event PriceUpdated(uint256 newPrice);
     event FundsWithdrawn(address indexed to, uint256 amount);
+    event ContractWhitelisted(address indexed contractAddress, bool status);
 
     // ============ Errors ============
 
@@ -118,6 +123,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     // error PurchaseLimitExceeded();
     // error BadgeRequiredForPurchase();
     error PaymentTransferFailed();
+    error NotWhitelistedContract();
 
     // ============ Constructor ============
 
@@ -141,7 +147,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     ) ERC20("preGVT", "preGVT") {
         if (_badge == address(0)) revert ZeroAddress();
         if (_paymentToken == address(0)) revert ZeroAddress();
-        // if (_treasury == address(0)) revert ZeroAddress();
         if (_initialAdmin == address(0)) revert ZeroAddress();
         if (_airdropReserveCap == 0) revert ZeroAmount();
 
@@ -157,6 +162,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         _grantRole(MIGRATOR_SETTER_ROLE, _initialAdmin);
         _grantRole(PRICE_MANAGER_ROLE, _initialAdmin);
         _grantRole(TREASURY_ROLE, _initialAdmin);
+        _grantRole(WHITELIST_MANAGER_ROLE, _initialAdmin);
 
         emit AirdropReserveDefined(_airdropReserveCap);
     }
@@ -216,6 +222,35 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         if (perUserPurchaseLimit == 0) return type(uint256).max;
         uint256 purchased = userPurchases[user];
         return purchased >= perUserPurchaseLimit ? 0 : perUserPurchaseLimit - purchased;
+    }
+
+    // ============ Whitelist Management ============
+
+    /**
+     * @notice Add or remove contract from whitelist
+     * @param contractAddress Address to whitelist/unwhitelist
+     * @param status True to whitelist, false to remove
+     */
+    function setWhitelistedContract(address contractAddress, bool status) external onlyRole(WHITELIST_MANAGER_ROLE) {
+        if (contractAddress == address(0)) revert ZeroAddress();
+        whitelistedContracts[contractAddress] = status;
+        emit ContractWhitelisted(contractAddress, status);
+    }
+
+    /**
+     * @notice Batch whitelist multiple contracts
+     * @param contracts Array of contract addresses
+     * @param status True to whitelist, false to remove
+     */
+    function batchSetWhitelistedContracts(address[] calldata contracts, bool status)
+        external
+        onlyRole(WHITELIST_MANAGER_ROLE)
+    {
+        for (uint256 i = 0; i < contracts.length; i++) {
+            if (contracts[i] == address(0)) revert ZeroAddress();
+            whitelistedContracts[contracts[i]] = status;
+            emit ContractWhitelisted(contracts[i], status);
+        }
     }
 
     // ============ Admin Functions ============
@@ -461,37 +496,72 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     // ============ Non-Transferable Overrides ============
 
     /**
-     * @notice Transfer disabled - token is non-transferable
+     * @notice Transfer - only allowed to whitelisted contracts (e.g., staking)
+     * @param to Recipient address
+     * @param amount Amount to transfer
      */
-    function transfer(address, uint256) public pure override returns (bool) {
-        revert TransferNotAllowed();
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        // Only allow transfers to whitelisted contracts
+        if (!whitelistedContracts[to]) revert TransferNotAllowed();
+
+        return super.transfer(to, amount);
     }
 
     /**
-     * @notice TransferFrom disabled - token is non-transferable
+     * @notice TransferFrom - only allowed to/from whitelisted contracts
+     * @param from Sender address
+     * @param to Recipient address
+     * @param amount Amount to transfer
      */
-    function transferFrom(address, address, uint256) public pure override returns (bool) {
-        revert TransferNotAllowed();
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        // Allow transfers to whitelisted contracts (e.g., staking deposits)
+        // Allow transfers from whitelisted contracts (e.g., staking withdrawals)
+        if (!whitelistedContracts[to] && !whitelistedContracts[from]) {
+            revert TransferNotAllowed();
+        }
+
+        return super.transferFrom(from, to, amount);
     }
 
     /**
-     * @notice Approve disabled - token is non-transferable
+     * @notice Approve - only allowed for whitelisted contracts
+     * @param spender Spender address
+     * @param amount Amount to approve
      */
-    function approve(address, uint256) public pure override returns (bool) {
-        revert ApprovalNotAllowed();
+    function approve(address spender, uint256 amount) public override returns (bool) {
+        // Only allow approving whitelisted contracts
+        if (!whitelistedContracts[spender]) revert ApprovalNotAllowed();
+
+        return super.approve(spender, amount);
     }
 
     /**
-     * @notice IncreaseAllowance disabled - token is non-transferable
+     * @notice IncreaseAllowance - only allowed for whitelisted contracts
+     * @param spender Spender address
+     * @param addedValue Amount to increase
      */
-    function increaseAllowance(address, uint256) public pure returns (bool) {
-        revert ApprovalNotAllowed();
+    function increaseAllowance(address spender, uint256 addedValue) public returns (bool) {
+        if (!whitelistedContracts[spender]) revert ApprovalNotAllowed();
+
+        address owner = _msgSender();
+        _approve(owner, spender, allowance(owner, spender) + addedValue);
+        return true;
     }
 
     /**
-     * @notice DecreaseAllowance disabled - token is non-transferable
+     * @notice DecreaseAllowance - only allowed for whitelisted contracts
+     * @param spender Spender address
+     * @param subtractedValue Amount to decrease
      */
-    function decreaseAllowance(address, uint256) public pure returns (bool) {
-        revert ApprovalNotAllowed();
+    function decreaseAllowance(address spender, uint256 subtractedValue) public returns (bool) {
+        if (!whitelistedContracts[spender]) revert ApprovalNotAllowed();
+
+        address owner = _msgSender();
+        uint256 currentAllowance = allowance(owner, spender);
+        require(currentAllowance >= subtractedValue, "ERC20: decreased allowance below zero");
+        unchecked {
+            _approve(owner, spender, currentAllowance - subtractedValue);
+        }
+        return true;
     }
 }

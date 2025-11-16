@@ -1,0 +1,49 @@
+{
+  "transactions": [
+    {
+      "hash": "0x3c79f0ea6042ce52df95f6bbdf50c4a2ff05a2d201ba1fc9c7e8b35a58444b19",
+      "transactionType": "CALL",
+      "contractName": null,
+      "contractAddress": "0xee3f2167681c15a4bc481b13dd8607a3a838c87e",
+      "function": "setCurrentEpoch(uint256)",
+      "arguments": [
+        "1"
+      ],
+      "transaction": {
+        "from": "0x91935e2e959fb504640280c08530156c67f89479",
+        "to": "0xee3f2167681c15a4bc481b13dd8607a3a838c87e",
+        "gas": "0x105a9",
+        "value": "0x0",
+        "input": "0x1dd6b9b10000000000000000000000000000000000000000000000000000000000000001",
+        "nonce": "0x9c",
+        "chainId": "0x38"
+      },
+      "additionalContracts": [],
+      "isFixedGasLimit": false
+    }
+  ],
+  "receipts": [
+    {
+      "status": "0x1",
+      "cumulativeGasUsed": "0x1ea8933",
+      "logs": [],
+      "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "type": "0x0",
+      "transactionHash": "0x3c79f0ea6042ce52df95f6bbdf50c4a2ff05a2d201ba1fc9c7e8b35a58444b19",
+      "transactionIndex": "0xd3",
+      "blockHash": "0xbb2206e600e15a34d6f031722e5ff98db332b96ca986aa72e19abe7fc81e0c5b",
+      "blockNumber": "0x4016804",
+      "gasUsed": "0xb2ea",
+      "effectiveGasPrice": "0x2faf080",
+      "from": "0x91935e2e959fb504640280c08530156c67f89479",
+      "to": "0xee3f2167681c15a4bc481b13dd8607a3a838c87e",
+      "contractAddress": null
+    }
+  ],
+  "libraries": [],
+  "pending": [],
+  "returns": {},
+  "timestamp": 1762401737,
+  "chain": 56,
+  "commit": "a574fda"
+}
