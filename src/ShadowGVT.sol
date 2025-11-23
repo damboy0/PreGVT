@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 /**
  * @title ShadowGVT
  * @notice Non-transferable preview token for on-chain price visibility before TGE
- * @dev Implementation plan: https://docs.agv.dev/shadow-gvt
+ *
  *
  * Key properties:
  * - ERC20 token with transfers disabled (except mint/burn)
