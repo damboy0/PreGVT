@@ -180,7 +180,7 @@ contract DeployPreGVT is Script {
  */
 contract SetupPreGVT is Script {
     // Update these after deployment
-    address payable PREGVT_ADDRESS = payable(0x369d768E5a13ed71891094b55b4A464D1D8A4D50); // UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9); // UPDATE THIS
     address BADGE_ADDRESS = 0xd1215311b1CabDb911BCaAAc2ebcB291C7659cdc; // UPDATE THIS
     address payable TREASURY_ADDRESS = payable(0xeA7BD7f0DeB88d1E54d0850aA8909B8AF93Cb3f1);
 
@@ -197,7 +197,7 @@ contract SetupPreGVT is Script {
 
         vm.startBroadcast(adminPrivateKey);
 
-        address payable preGvtAddress = payable(0x441328d370e1e685980CFcdd0b129E92433DE17b);
+        address payable preGvtAddress = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9);
         PreGVT preGVT = PreGVT(preGvtAddress);
 
         // NEW: Set treasury
@@ -223,7 +223,7 @@ contract SetupPreGVT is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:ConfigurePresale --rpc-url <RPC_URL> --broadcast
  */
 contract ConfigurePresale is Script {
-    address payable PREGVT_ADDRESS = payable(0x3B4300D9139bAB1e5F604811F412B6588D0e81e6); // UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9); // UPDATE THIS
 
     // Presale configuration - UPDATE THESE
     uint256 constant PRICE_PER_TOKEN = 5e15; // 0.005 USDT per token (add 18 decimals)
@@ -263,7 +263,7 @@ contract ConfigurePresale is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:ActivatePresale --rpc-url <RPC_URL> --broadcast
  */
 contract ActivatePresale is Script {
-    address payable PREGVT_ADDRESS = payable(0x3B4300D9139bAB1e5F604811F412B6588D0e81e6); // UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9); // UPDATE THIS
     bool constant ACTIVATE = true; // Set to false to deactivate
 
     function run() external {
@@ -454,37 +454,208 @@ contract BatchAirdropScript is Script {
     }
 }
 
+// Add these contracts to the END of your DeployPreGVT.s.sol file
+// Right after the BatchAirdropScript contract
+
 /**
- * @title EnableMigration
- * @notice Enable migration to main GVT token
- * @dev Run with: forge script script/DeployPreGVT.s.sol:EnableMigration --rpc-url <RPC_URL> --broadcast
+ * @title LoadAllocationsFromCSV
+ * @notice Load allocations from tier3_wallets.csv
+ * @dev Run with: forge script script/DeployPreGVT.s.sol:LoadAllocationsFromCSV --rpc-url <RPC_URL> --broadcast
  */
-// contract EnableMigration is Script {
-//     address payable PREGVT_ADDRESS ;
-//     address constant MIGRATOR_ADDRESS = vm.envAddress("MIGRATOR_SETTER"); // UPDATE THIS - after migrator is deployed
+contract LoadAllocationsFromCSV is Script {
+    address payable constant PREGVT_ADDRESS = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9);
+    uint256 constant AMOUNT_PER_WALLET = 500e18;
+    uint256 constant BATCH_SIZE = 50;
 
-//     function run() external {
-//         require(PREGVT_ADDRESS != address(0), "Update PREGVT_ADDRESS");
-//         require(MIGRATOR_ADDRESS != address(0), "Update MIGRATOR_ADDRESS");
+    function run() external {
+        uint256 pk = vm.envUint("PRIVATE_KEY");
+        PreGVT preGVT = PreGVT(PREGVT_ADDRESS);
 
-//         uint256 adminPrivateKey = vm.envUint("ADMIN_PRIVATE_KEY");
+        console.log("====================================");
+        console.log("Loading Tier 3 Allocations");
+        console.log("====================================");
+        console.log("File: tier3_wallets.csv");
+        console.log("Amount per wallet: 500 tokens");
+        console.log("====================================\n");
 
-//         PreGVT preGVT = PreGVT(PREGVT_ADDRESS);
+        // Read the CSV file
+        string memory csvContent = vm.readFile("tier3_wallets.csv");
+        string[] memory lines = vm.split(csvContent, "\n");
 
-//         console.log("====================================");
-//         console.log("Enabling Migration");
-//         console.log("====================================");
-//         console.log("PreGVT:", PREGVT_ADDRESS);
-//         console.log("Migrator:", MIGRATOR_ADDRESS);
+        console.log("Total lines read:", lines.length);
 
-//         vm.startBroadcast(adminPrivateKey);
+        // Parse addresses
+        address[] memory addresses = new address[](lines.length);
+        uint256 validCount = 0;
 
-//         preGVT.setMigrator(MIGRATOR_ADDRESS);
+        for (uint256 i = 0; i < lines.length; i++) {
+            string memory line = vm.trim(lines[i]);
 
-//         vm.stopBroadcast();
+            // Skip empty lines and headers
+            if (bytes(line).length == 0) continue;
+            if (vm.indexOf(line, "address") != type(uint256).max) continue;
+            if (vm.indexOf(line, "wallet") != type(uint256).max) continue;
 
-//         console.log("Migration enabled!");
-//         console.log("Users can now call migrateToGVT()");
-//         console.log("====================================");
-//     }
-// }
+            if (bytes(line).length >= 42) {
+                string[] memory parts = vm.split(line, ",");
+                string memory addrStr = vm.trim(parts[0]);
+
+                try vm.parseAddress(addrStr) returns (address addr) {
+                    addresses[validCount] = addr;
+                    validCount++;
+                } catch {
+                    console.log("Warning: Invalid address:", addrStr);
+                }
+            }
+        }
+
+        console.log("Valid addresses found:", validCount);
+
+        if (validCount == 0) {
+            console.log("ERROR: No valid addresses found!");
+            return;
+        }
+
+        // Resize to actual size
+        address[] memory finalAddresses = new address[](validCount);
+        for (uint256 i = 0; i < validCount; i++) {
+            finalAddresses[i] = addresses[i];
+        }
+
+        console.log("\nStarting batch loading...\n");
+
+        vm.startBroadcast(pk);
+
+        uint256 totalBatches = (validCount + BATCH_SIZE - 1) / BATCH_SIZE;
+
+        for (uint256 batch = 0; batch < totalBatches; batch++) {
+            uint256 start = batch * BATCH_SIZE;
+            uint256 end = start + BATCH_SIZE > validCount ? validCount : start + BATCH_SIZE;
+            uint256 batchLength = end - start;
+
+            address[] memory batchUsers = new address[](batchLength);
+            uint256[] memory batchAmounts = new uint256[](batchLength);
+
+            for (uint256 i = 0; i < batchLength; i++) {
+                batchUsers[i] = finalAddresses[start + i];
+                batchAmounts[i] = AMOUNT_PER_WALLET;
+            }
+
+            preGVT.setAllocations(batchUsers, batchAmounts);
+
+            // console.log("Batch", batch + 1, , totalBatches, "completed -", batchLength, "addresses");
+        }
+
+        vm.stopBroadcast();
+
+        console.log("\n====================================");
+        console.log("SUCCESS!");
+        console.log("====================================");
+        console.log("Total addresses loaded:", validCount);
+        console.log("Total tokens allocated:", (validCount * AMOUNT_PER_WALLET) / 1e18);
+        console.log("====================================");
+    }
+}
+
+/**
+ * @title VerifyTier2Allocations
+ * @notice Verify all tier 2 allocations were loaded correctly
+ * @dev Run with: forge script script/DeployPreGVT.s.sol:VerifyTier2Allocations --rpc-url <RPC_URL>
+ */
+contract VerifyTier2Allocations is Script {
+    address payable constant PREGVT_ADDRESS = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9);
+    uint256 constant EXPECTED_AMOUNT = 1000e18;
+
+    function run() external view {
+        PreGVT preGVT = PreGVT(PREGVT_ADDRESS);
+
+        console.log("====================================");
+        console.log("Verifying Tier 2 Allocations");
+        console.log("====================================");
+
+        string memory csvContent = vm.readFile("tier3_wallets.csv");
+        string[] memory lines = vm.split(csvContent, "\n");
+
+        uint256 correctCount = 0;
+        uint256 incorrectCount = 0;
+
+        for (uint256 i = 0; i < lines.length; i++) {
+            string memory line = vm.trim(lines[i]);
+
+            if (bytes(line).length == 0) continue;
+            if (vm.indexOf(line, "address") != type(uint256).max) continue;
+            if (vm.indexOf(line, "wallet") != type(uint256).max) continue;
+
+            if (bytes(line).length >= 42) {
+                string[] memory parts = vm.split(line, ",");
+                string memory addrStr = vm.trim(parts[0]);
+
+                try vm.parseAddress(addrStr) returns (address addr) {
+                    uint256 allocation = preGVT.allowanceOf(addr);
+
+                    if (allocation == EXPECTED_AMOUNT) {
+                        correctCount++;
+                    } else {
+                        console.log("Incorrect:", addr);
+                        console.log("  Expected: 1000, Got:", allocation / 1e18);
+                        incorrectCount++;
+                    }
+                } catch {}
+            }
+        }
+
+        console.log("\n====================================");
+        console.log("Verification Results");
+        console.log("====================================");
+        console.log("Correct allocations:", correctCount);
+        console.log("Incorrect allocations:", incorrectCount);
+        console.log("Total checked:", correctCount + incorrectCount);
+
+        if (incorrectCount == 0) {
+            console.log(" ALL CORRECT!");
+        }
+        console.log("====================================");
+    }
+}
+
+/**
+ * @title PreviewTier2CSV
+ * @notice Preview first 10 addresses from CSV
+ * @dev Run with: forge script script/DeployPreGVT.s.sol:PreviewTier2CSV --rpc-url <RPC_URL>
+ */
+contract PreviewTier2CSV is Script {
+    function run() external view {
+        console.log("====================================");
+        console.log("CSV Preview - tier3_wallets.csv");
+        console.log("====================================");
+
+        string memory csvContent = vm.readFile("tier3_wallets.csv");
+        string[] memory lines = vm.split(csvContent, "\n");
+
+        console.log("Total lines:", lines.length);
+        console.log("\nFirst 10 addresses:");
+
+        uint256 count = 0;
+        for (uint256 i = 0; i < lines.length && count < 10; i++) {
+            string memory line = vm.trim(lines[i]);
+
+            if (bytes(line).length == 0) continue;
+            if (vm.indexOf(line, "address") != type(uint256).max) continue;
+            if (vm.indexOf(line, "wallet") != type(uint256).max) continue;
+
+            if (bytes(line).length >= 42) {
+                string[] memory parts = vm.split(line, ",");
+                string memory addrStr = vm.trim(parts[0]);
+
+                try vm.parseAddress(addrStr) returns (address addr) {
+                    console.log(count + 1, ":", addr);
+                    count++;
+                } catch {
+                    console.log("Invalid:", addrStr);
+                }
+            }
+        }
+
+        console.log("====================================");
+    }
+}

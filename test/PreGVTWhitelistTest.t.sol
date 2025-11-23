@@ -240,24 +240,6 @@ contract PreGVTWhitelistTest is Test {
         assertEq(preGVT.allowance(user1, address(staking)), 1000e18);
     }
 
-    function testIncreaseAllowanceRevertsForNonWhitelisted() public {
-        vm.expectRevert(PreGVT.ApprovalNotAllowed.selector);
-        vm.prank(user1);
-        preGVT.increaseAllowance(user2, 1000e18);
-    }
-
-    function testIncreaseAllowanceSucceedsForWhitelisted() public {
-        vm.prank(admin);
-        preGVT.setWhitelistedContract(address(staking), true);
-
-        vm.startPrank(user1);
-        preGVT.approve(address(staking), 1000e18);
-        preGVT.increaseAllowance(address(staking), 500e18);
-        vm.stopPrank();
-
-        assertEq(preGVT.allowance(user1, address(staking)), 1500e18);
-    }
-
     // ============ Staking Integration Tests ============
 
     // function testFullStakingFlow() public {

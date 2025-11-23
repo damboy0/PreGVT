@@ -18,8 +18,8 @@ interface IGenesisBadge1155 {
 
 /**
  * @title PreGVT
- * @notice Non-transferable pre-token for badge-gated airdrops with presale
- * @dev Implements formal airdrop reserve with badge-gated claims and public presale
+ * @notice Buy-only pre-token with DEX integration for price visibility
+ * @dev Implements sell-blocking, badge-gated airdrops, and public presale
  */
 contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     // ============ Roles ============
@@ -47,10 +47,16 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Payment token (USDT) address
     IERC20 public immutable paymentToken;
 
-    /// @notice Treasury address for receiving funds
-    address public immutable treasury;
-
     // ============ Mutable State ============
+
+    /// @notice Treasury address for receiving funds and LP management
+    address public treasury;
+
+    /// @notice DEX router address (for sell-blocking logic)
+    address public dexRouter;
+
+    /// @notice DEX pair address (preGVT/USDT)
+    address public dexPair;
 
     /// @notice Total tokens minted from airdrop reserve
     uint256 public airdropReserveMinted;
@@ -67,7 +73,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Whether migration to main token is enabled
     bool public migrationEnabled;
 
-    /// @notice Price per token in wei (e.g., 0.01 ETH = 10000000000000000)
+    /// @notice Price per token in payment token units (scaled by 1e18)
     uint256 public pricePerToken;
 
     /// @notice Whether presale is active
@@ -85,6 +91,15 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Whitelisted contracts that can receive transfers (e.g., staking contracts)
     mapping(address => bool) public whitelistedContracts;
 
+    /// @notice Price stages for presale (in payment token units)
+    uint256[] public stagePrices;
+
+    /// @notice Supply caps for each stage
+    uint256[] public stageCaps;
+
+    /// @notice Current indicative price (for display purposes only)
+    uint256 public indicativePrice;
+
     // ============ Events ============
 
     event AirdropReserveDefined(uint256 cap);
@@ -100,6 +115,12 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     event PriceUpdated(uint256 newPrice);
     event FundsWithdrawn(address indexed to, uint256 amount);
     event ContractWhitelisted(address indexed contractAddress, bool status);
+    event PriceStagesConfigured(uint256[] prices, uint256[] caps);
+    event IndicativePriceUpdated(uint256 newPrice);
+    event TreasuryUpdated(address indexed newTreasury);
+    event DexRouterUpdated(address indexed newRouter);
+    event DexPairUpdated(address indexed newPair);
+    event SellBlocked(address indexed from, address indexed to, uint256 amount);
 
     // ============ Errors ============
 
@@ -115,27 +136,15 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     error ZeroAmount();
     error PresaleNotActive();
     error PresaleCapExceeded();
-    error InsufficientPayment();
     error InvalidPrice();
     error PurchaseLimitExceeded();
     error BadgeRequiredForPurchase();
     error TreasuryNotSet();
-    // error PurchaseLimitExceeded();
-    // error BadgeRequiredForPurchase();
     error PaymentTransferFailed();
-    error NotWhitelistedContract();
+    error SellDisabled();
 
     // ============ Constructor ============
 
-    /**
-     * @notice Initialize PreGVT contract
-     * @param _badge Address of Genesis Badge contract
-     * @param _badgeId ID of the badge required for claims
-     * @param _airdropReserveCap Maximum tokens that can be minted from airdrop
-     * @param _presaleSupplyCap Maximum tokens that can be sold in presale
-     * @param _treasury Treasury address for receiving funds
-     * @param _initialAdmin Address to receive admin role
-     */
     constructor(
         address _badge,
         uint256 _badgeId,
@@ -169,79 +178,97 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
 
     // ============ View Functions ============
 
-    /**
-     * @notice Get remaining airdrop reserve
-     * @return Tokens still available in reserve
-     */
     function airdropReserveRemaining() external view returns (uint256) {
         return airdropReserveCap - airdropReserveMinted;
     }
 
-    /**
-     * @notice Get remaining presale supply
-     * @return Tokens still available for presale
-     */
     function presaleRemaining() external view returns (uint256) {
         return presaleSupplyCap - presaleSold;
     }
 
-    /**
-     * @notice Check if user has required badge
-     * @param user Address to check
-     * @return True if user has badge
-     * @dev External call in loop (batchAirdrop) — caller must limit batch size.
-     */
     function hasBadge(address user) public view returns (bool) {
         return badge.balanceOf(user, badgeId) > 0;
     }
 
-    /**
-     * @notice Get user's preloaded allocation
-     * @param user Address to check
-     * @return Allocated amount
-     */
     function allowanceOf(address user) external view returns (uint256) {
         return claimable[user];
     }
 
-    /**
-     * @notice Calculate cost for purchasing amount of tokens
-     * @param amount Number of tokens to purchase
-     * @return cost Total cost in wei
-     */
     function calculateCost(uint256 amount) public view returns (uint256 cost) {
-        return amount * pricePerToken / 1e18;
+        return (amount * pricePerToken) / 1e18;
     }
 
-    /**
-     * @notice Get remaining purchase limit for user
-     * @param user Address to check
-     * @return remaining Remaining tokens user can purchase
-     */
     function remainingPurchaseLimit(address user) external view returns (uint256) {
         if (perUserPurchaseLimit == 0) return type(uint256).max;
         uint256 purchased = userPurchases[user];
         return purchased >= perUserPurchaseLimit ? 0 : perUserPurchaseLimit - purchased;
     }
 
+    /**
+     * @notice Get current price based on sales stages
+     * @return Current price in payment token units or indicativePrice if stages not set
+     */
+    function getCurrentPrice() public view returns (uint256) {
+        if (stagePrices.length == 0) {
+            return indicativePrice > 0 ? indicativePrice : pricePerToken;
+        }
+
+        uint256 sold = presaleSold;
+        for (uint256 i = 0; i < stageCaps.length; i++) {
+            if (sold < stageCaps[i]) {
+                return stagePrices[i];
+            }
+        }
+
+        return stagePrices[stagePrices.length - 1];
+    }
+
+    function getCurrentStage() public view returns (uint256) {
+        uint256 sold = presaleSold;
+        for (uint256 i = 0; i < stageCaps.length; i++) {
+            if (sold < stageCaps[i]) {
+                return i;
+            }
+        }
+        return stageCaps.length - 1;
+    }
+
+    function getPriceStages()
+        external
+        view
+        returns (uint256[] memory prices, uint256[] memory caps, uint256 currentStage)
+    {
+        return (stagePrices, stageCaps, getCurrentStage());
+    }
+
+    // ============ DEX Management ============
+
+    function setDexRouter(address _router) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_router == address(0)) revert ZeroAddress();
+        dexRouter = _router;
+        emit DexRouterUpdated(_router);
+    }
+
+    function setDexPair(address _pair) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_pair == address(0)) revert ZeroAddress();
+        dexPair = _pair;
+        emit DexPairUpdated(_pair);
+    }
+
+    function setTreasury(address _treasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_treasury == address(0)) revert ZeroAddress();
+        treasury = _treasury;
+        emit TreasuryUpdated(_treasury);
+    }
+
     // ============ Whitelist Management ============
 
-    /**
-     * @notice Add or remove contract from whitelist
-     * @param contractAddress Address to whitelist/unwhitelist
-     * @param status True to whitelist, false to remove
-     */
     function setWhitelistedContract(address contractAddress, bool status) external onlyRole(WHITELIST_MANAGER_ROLE) {
         if (contractAddress == address(0)) revert ZeroAddress();
         whitelistedContracts[contractAddress] = status;
         emit ContractWhitelisted(contractAddress, status);
     }
 
-    /**
-     * @notice Batch whitelist multiple contracts
-     * @param contracts Array of contract addresses
-     * @param status True to whitelist, false to remove
-     */
     function batchSetWhitelistedContracts(address[] calldata contracts, bool status)
         external
         onlyRole(WHITELIST_MANAGER_ROLE)
@@ -255,26 +282,14 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
 
     // ============ Admin Functions ============
 
-    /**
-     * @notice Pause all claim and purchase operations
-     */
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _pause();
     }
 
-    /**
-     * @notice Unpause all claim and purchase operations
-     */
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _unpause();
     }
 
-    /**
-     * @notice Configure presale parameters
-     * @param _pricePerToken Price per token in wei
-     * @param _badgeRequired Whether badge is required for purchase
-     * @param _perUserLimit Per-user purchase limit (0 = no limit)
-     */
     function configurePresale(uint256 _pricePerToken, bool _badgeRequired, uint256 _perUserLimit)
         external
         onlyRole(PRICE_MANAGER_ROLE)
@@ -288,28 +303,39 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         emit PresaleConfigured(_pricePerToken, _badgeRequired, _perUserLimit);
     }
 
-    /**
-     * @notice Update token price
-     * @param _pricePerToken New price per token in wei
-     */
     function updatePrice(uint256 _pricePerToken) external onlyRole(PRICE_MANAGER_ROLE) {
         if (_pricePerToken == 0) revert InvalidPrice();
         pricePerToken = _pricePerToken;
         emit PriceUpdated(_pricePerToken);
     }
 
-    /**
-     * @notice Enable or disable presale
-     * @param _active Whether presale should be active
-     */
+    function configurePriceStages(uint256[] calldata _prices, uint256[] calldata _caps)
+        external
+        onlyRole(PRICE_MANAGER_ROLE)
+    {
+        require(_prices.length == _caps.length, "Length mismatch");
+        require(_prices.length > 0, "Empty arrays");
+
+        for (uint256 i = 1; i < _caps.length; i++) {
+            require(_caps[i] > _caps[i - 1], "Caps must increase");
+        }
+
+        stagePrices = _prices;
+        stageCaps = _caps;
+
+        emit PriceStagesConfigured(_prices, _caps);
+    }
+
+    function setIndicativePrice(uint256 _price) external onlyRole(PRICE_MANAGER_ROLE) {
+        indicativePrice = _price;
+        emit IndicativePriceUpdated(_price);
+    }
+
     function setPresaleActive(bool _active) external onlyRole(DEFAULT_ADMIN_ROLE) {
         presaleActive = _active;
         emit PresaleStatusChanged(_active);
     }
 
-    /**
-     * @notice Withdraw accumulated funds to treasury
-     */
     function withdrawFunds() external onlyRole(TREASURY_ROLE) nonReentrant {
         if (treasury == address(0)) revert TreasuryNotSet();
 
@@ -322,13 +348,9 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         emit FundsWithdrawn(treasury, balance);
     }
 
-    /**
-     * @notice Set migrator contract address (one-time)
-     * @param _migrator Address of migrator contract
-     */
     function setMigrator(address _migrator) external onlyRole(MIGRATOR_SETTER_ROLE) {
         if (_migrator == address(0)) revert InvalidMigrator();
-        if (migrator != address(0)) revert InvalidMigrator(); // Can only be set once
+        if (migrator != address(0)) revert InvalidMigrator();
 
         migrator = _migrator;
         migrationEnabled = true;
@@ -336,11 +358,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         emit MigrationEnabled(_migrator);
     }
 
-    /**
-     * @notice Preload allocations for multiple users (Pattern B)
-     * @param users Array of user addresses
-     * @param amounts Array of allocation amounts
-     */
     function setAllocations(address[] calldata users, uint256[] calldata amounts) external onlyRole(DISTRIBUTOR_ROLE) {
         if (users.length != amounts.length) revert ArrayLengthMismatch();
 
@@ -351,12 +368,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         }
     }
 
-    /**
-     * @notice Direct batch airdrop to multiple users
-     * @param users Array of recipient addresses
-     * @param amounts Array of airdrop amounts
-     * @dev All recipients must have badges
-     */
     function batchAirdrop(address[] calldata users, uint256[] calldata amounts)
         external
         onlyRole(DISTRIBUTOR_ROLE)
@@ -380,89 +391,62 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
 
     // ============ User Functions ============
 
-    /**
-     * @notice Buy tokens at presale price using USDT
-     * @param amount Number of tokens to purchase
-     */
     function buy(uint256 amount) external whenNotPaused nonReentrant {
         if (!presaleActive) revert PresaleNotActive();
         if (amount == 0) revert ZeroAmount();
-        if (badgeRequiredForPurchase && !hasBadge(msg.sender)) revert BadgeRequiredForPurchase();
+        if (badgeRequiredForPurchase && !hasBadge(msg.sender)) {
+            revert BadgeRequiredForPurchase();
+        }
 
-        // Check presale cap
         if (presaleSold + amount > presaleSupplyCap) revert PresaleCapExceeded();
 
-        // Check per-user limit
         if (perUserPurchaseLimit > 0) {
             if (userPurchases[msg.sender] + amount > perUserPurchaseLimit) {
                 revert PurchaseLimitExceeded();
             }
         }
 
-        // Calculate cost
         uint256 cost = calculateCost(amount);
         if (cost == 0) revert ZeroAmount();
 
-        // Transfer payment tokens from user to contract
         bool success = paymentToken.transferFrom(msg.sender, address(this), cost);
         if (!success) revert PaymentTransferFailed();
 
-        // Update state
         presaleSold += amount;
         userPurchases[msg.sender] += amount;
 
-        // Mint tokens
         _mint(msg.sender, amount);
 
         emit TokensPurchased(msg.sender, amount, cost);
     }
 
-    /**
-     * @notice Claim preloaded allocation (Pattern B)
-     * @dev Requires badge and consumes it via operator burn
-     */
     function claimAllocated() external whenNotPaused nonReentrant {
         uint256 amount = claimable[msg.sender];
         if (amount == 0) revert NoAllocation();
         if (!hasBadge(msg.sender)) revert NoBadge();
 
-        // Clear allocation before external call
         claimable[msg.sender] = 0;
 
-        // Try to burn badge via operator (single-tx UX)
         try badge.redeemByOperator(msg.sender, badgeId, 1) {
             emit BadgeConsumed(msg.sender, badgeId, 1);
-        } catch {
-            // If operator burn fails, user must have burned badge manually (two-tx UX)
-            // This allows backward compatibility
-        }
+        } catch {}
 
         _mintFromReserve(msg.sender, amount);
     }
 
-    /**
-     * @notice Claim with badge for fixed amount (Pattern A)
-     * @param amount Amount to claim
-     * @dev Requires badge and consumes it
-     */
     function claimWithBadge(uint256 amount) external whenNotPaused nonReentrant {
         if (amount == 0) revert ZeroAmount();
         if (!hasBadge(msg.sender)) revert NoBadge();
 
-        // Try to burn badge via operator
         try badge.redeemByOperator(msg.sender, badgeId, 1) {
             emit BadgeConsumed(msg.sender, badgeId, 1);
         } catch {
-            revert NoBadge(); // For Pattern A, operator burn must succeed
+            revert NoBadge();
         }
 
         _mintFromReserve(msg.sender, amount);
     }
 
-    /**
-     * @notice Migrate preGVT to main GVT token
-     * @dev Burns preGVT and emits event for migrator to process
-     */
     function migrateToGVT() external nonReentrant {
         if (!migrationEnabled) revert MigrationNotEnabled();
         if (migrator == address(0)) revert InvalidMigrator();
@@ -477,11 +461,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
 
     // ============ Internal Functions ============
 
-    /**
-     * @notice Internal mint function with reserve cap enforcement
-     * @param to Recipient address
-     * @param amount Amount to mint
-     */
     function _mintFromReserve(address to, uint256 amount) internal {
         if (airdropReserveMinted + amount > airdropReserveCap) {
             revert ReserveCapExceeded();
@@ -493,75 +472,31 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         emit AirdropDistributed(to, amount, airdropReserveMinted);
     }
 
-    // ============ Non-Transferable Overrides ============
-
     /**
-     * @notice Transfer - only allowed to whitelisted contracts (e.g., staking)
-     * @param to Recipient address
-     * @param amount Amount to transfer
+     * @notice Override _update to implement sell-blocking logic
+     * @dev Blocks: router calling transferFrom(user → pair)
+     *      Allows: treasury → pair (LP add), pair → user (buy), mint/burn, whitelisted contracts
      */
-    function transfer(address to, uint256 amount) public override returns (bool) {
-        // Only allow transfers to whitelisted contracts
-        if (!whitelistedContracts[to]) revert TransferNotAllowed();
-
-        return super.transfer(to, amount);
-    }
-
-    /**
-     * @notice TransferFrom - only allowed to/from whitelisted contracts
-     * @param from Sender address
-     * @param to Recipient address
-     * @param amount Amount to transfer
-     */
-    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
-        // Allow transfers to whitelisted contracts (e.g., staking deposits)
-        // Allow transfers from whitelisted contracts (e.g., staking withdrawals)
-        if (!whitelistedContracts[to] && !whitelistedContracts[from]) {
-            revert TransferNotAllowed();
+    function _update(address from, address to, uint256 amount) internal override {
+        // Allow mint/burn
+        if (from == address(0) || to == address(0)) {
+            super._update(from, to, amount);
+            return;
         }
 
-        return super.transferFrom(from, to, amount);
-    }
-
-    /**
-     * @notice Approve - only allowed for whitelisted contracts
-     * @param spender Spender address
-     * @param amount Amount to approve
-     */
-    function approve(address spender, uint256 amount) public override returns (bool) {
-        // Only allow approving whitelisted contracts
-        if (!whitelistedContracts[spender]) revert ApprovalNotAllowed();
-
-        return super.approve(spender, amount);
-    }
-
-    /**
-     * @notice IncreaseAllowance - only allowed for whitelisted contracts
-     * @param spender Spender address
-     * @param addedValue Amount to increase
-     */
-    function increaseAllowance(address spender, uint256 addedValue) public returns (bool) {
-        if (!whitelistedContracts[spender]) revert ApprovalNotAllowed();
-
-        address owner = _msgSender();
-        _approve(owner, spender, allowance(owner, spender) + addedValue);
-        return true;
-    }
-
-    /**
-     * @notice DecreaseAllowance - only allowed for whitelisted contracts
-     * @param spender Spender address
-     * @param subtractedValue Amount to decrease
-     */
-    function decreaseAllowance(address spender, uint256 subtractedValue) public returns (bool) {
-        if (!whitelistedContracts[spender]) revert ApprovalNotAllowed();
-
-        address owner = _msgSender();
-        uint256 currentAllowance = allowance(owner, spender);
-        require(currentAllowance >= subtractedValue, "ERC20: decreased allowance below zero");
-        unchecked {
-            _approve(owner, spender, currentAllowance - subtractedValue);
+        // Allow whitelisted contracts (staking, etc.)
+        if (whitelistedContracts[from] || whitelistedContracts[to]) {
+            super._update(from, to, amount);
+            return;
         }
-        return true;
+
+        // SELL BLOCK: If router is caller and destination is pair, block (unless from treasury)
+        if (msg.sender == dexRouter && to == dexPair && from != treasury) {
+            emit SellBlocked(from, to, amount);
+            revert SellDisabled();
+        }
+
+        // Allow all other transfers (including direct treasury → pair for LP)
+        super._update(from, to, amount);
     }
 }

@@ -433,18 +433,6 @@ contract PreGVTTest is Test {
         preGVT.approve(user2, 1000e18);
     }
 
-    function testIncreaseAllowanceReverts() public {
-        vm.expectRevert(PreGVT.ApprovalNotAllowed.selector);
-        vm.prank(user1);
-        preGVT.increaseAllowance(user2, 1000e18);
-    }
-
-    function testDecreaseAllowanceReverts() public {
-        vm.expectRevert(PreGVT.ApprovalNotAllowed.selector);
-        vm.prank(user1);
-        preGVT.decreaseAllowance(user2, 1000e18);
-    }
-
     function testReserveCapEnforcement() public {
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);

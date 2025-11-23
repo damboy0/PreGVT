@@ -195,7 +195,7 @@ contract ConfigureNextEpoch is Script {
  */
 contract ActivateEpoch is Script {
     address STAKING_ADDRESS; // UPDATE THIS
-    uint256 constant EPOCH_ID = 1; // UPDATE THIS
+    uint256 constant EPOCH_ID = 0; // UPDATE THIS
 
     function run() external {
         STAKING_ADDRESS = vm.envAddress("STAKING_ADDRESS");
