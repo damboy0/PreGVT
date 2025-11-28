@@ -16,6 +16,15 @@ interface IGenesisBadge1155 {
     function redeemByOperator(address owner, uint256 id, uint256 amount) external;
 }
 
+
+/**
+ * @title IOldPreGVT
+ * @notice Interface for old PreGVT contract to read allocations
+ */
+interface IOldPreGVT {
+    function claimable(address user) external view returns (uint256);
+}
+
 /**
  * @title PreGVT
  * @notice Buy-only pre-token with DEX integration for price visibility
@@ -29,6 +38,8 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     bytes32 public constant PRICE_MANAGER_ROLE = keccak256("PRICE_MANAGER_ROLE");
     bytes32 public constant TREASURY_ROLE = keccak256("TREASURY_ROLE");
     bytes32 public constant WHITELIST_MANAGER_ROLE = keccak256("WHITELIST_MANAGER_ROLE");
+    bytes32 public constant BLACKLIST_MANAGER_ROLE = keccak256("BLACKLIST_MANAGER_ROLE");
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
     // ============ Immutable State ============
 
@@ -91,6 +102,9 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Whitelisted contracts that can receive transfers (e.g., staking contracts)
     mapping(address => bool) public whitelistedContracts;
 
+     /// @notice Blacklisted addresses (failsafe mechanism)
+    mapping(address => bool) public blacklisted;
+
     /// @notice Price stages for presale (in payment token units)
     uint256[] public stagePrices;
 
@@ -100,6 +114,15 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Current indicative price (for display purposes only)
     uint256 public indicativePrice;
 
+    /// @notice Migration contract that can mint tokens
+    address public migrationContract;
+
+    /// @notice Maximum supply that can be minted via migration
+    uint256 public immutable migrationSupplyCap;
+
+    /// @notice Total minted via migration
+    uint256 public migrationMinted;
+
     // ============ Events ============
 
     event AirdropReserveDefined(uint256 cap);
@@ -108,7 +131,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     event BadgeConsumed(address indexed user, uint256 indexed badgeId, uint256 amount);
     event MigrationEnabled(address indexed migrator);
     event Migrated(address indexed user, uint256 preGVTAmount);
-    event AllocationSet(address indexed user, uint256 amount);
+    // event AllocationSet(address indexed user, uint256 amount);
     event PresaleConfigured(uint256 pricePerToken, bool badgeRequired, uint256 perUserLimit);
     event PresaleStatusChanged(bool active);
     event TokensPurchased(address indexed buyer, uint256 amount, uint256 cost);
@@ -121,6 +144,11 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     event DexRouterUpdated(address indexed newRouter);
     event DexPairUpdated(address indexed newPair);
     event SellBlocked(address indexed from, address indexed to, uint256 amount);
+     event MigrationContractSet(address indexed migrationContract);
+    event MigrationMint(address indexed to, uint256 amount);
+    event AddressBlacklisted(address indexed account, bool status);
+    event AllocationSet(address indexed user, uint256 amount);
+    event AllocationCancelled(address indexed user, uint256 amount);
 
     // ============ Errors ============
 
@@ -142,6 +170,8 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     error TreasuryNotSet();
     error PaymentTransferFailed();
     error SellDisabled();
+    error MigrationCapExceeded();
+    error InvalidMigrationContract();
 
     // ============ Constructor ============
 
@@ -172,6 +202,8 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         _grantRole(PRICE_MANAGER_ROLE, _initialAdmin);
         _grantRole(TREASURY_ROLE, _initialAdmin);
         _grantRole(WHITELIST_MANAGER_ROLE, _initialAdmin);
+        _grantRole(BLACKLIST_MANAGER_ROLE, _initialAdmin);
+
 
         emit AirdropReserveDefined(_airdropReserveCap);
     }
@@ -202,6 +234,10 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         if (perUserPurchaseLimit == 0) return type(uint256).max;
         uint256 purchased = userPurchases[user];
         return purchased >= perUserPurchaseLimit ? 0 : perUserPurchaseLimit - purchased;
+    }
+
+    function migrationRemaining() external view returns (uint256) {
+        return migrationSupplyCap - migrationMinted;
     }
 
     /**
@@ -277,6 +313,29 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
             if (contracts[i] == address(0)) revert ZeroAddress();
             whitelistedContracts[contracts[i]] = status;
             emit ContractWhitelisted(contracts[i], status);
+        }
+    }
+
+    // ============ Blacklist Management (Failsafe) ============
+
+    /**
+     * @notice Blacklist an address (emergency failsafe)
+     * @dev Blacklisted addresses cannot transfer tokens
+     */
+    function setBlacklisted(address account, bool status) external onlyRole(BLACKLIST_MANAGER_ROLE) {
+        if (account == address(0)) revert ZeroAddress();
+        blacklisted[account] = status;
+        emit AddressBlacklisted(account, status);
+    }
+
+    /**
+     * @notice Batch blacklist addresses
+     */
+    function batchSetBlacklisted(address[] calldata accounts, bool status) external onlyRole(BLACKLIST_MANAGER_ROLE) {
+        for (uint256 i = 0; i < accounts.length; i++) {
+            if (accounts[i] == address(0)) revert ZeroAddress();
+            blacklisted[accounts[i]] = status;
+            emit AddressBlacklisted(accounts[i], status);
         }
     }
 
@@ -365,6 +424,33 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
             if (users[i] == address(0)) revert ZeroAddress();
             claimable[users[i]] += amounts[i];
             emit AllocationSet(users[i], amounts[i]);
+        }
+    }
+
+    /**
+     * @notice Cancel allocation for a user
+     * @dev Useful if allocation was set incorrectly
+     */
+    function cancelAllocation(address user) external onlyRole(DISTRIBUTOR_ROLE) {
+        if (user == address(0)) revert ZeroAddress();
+        uint256 amount = claimable[user];
+        if (amount == 0) revert NoAllocation();
+
+        claimable[user] = 0;
+        emit AllocationCancelled(user, amount);
+    }
+
+    /**
+     * @notice Batch cancel allocations
+     */
+    function batchCancelAllocations(address[] calldata users) external onlyRole(DISTRIBUTOR_ROLE) {
+        for (uint256 i = 0; i < users.length; i++) {
+            if (users[i] == address(0)) revert ZeroAddress();
+            uint256 amount = claimable[users[i]];
+            if (amount > 0) {
+                claimable[users[i]] = 0;
+                emit AllocationCancelled(users[i], amount);
+            }
         }
     }
 
@@ -459,6 +545,56 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         emit Migrated(msg.sender, amount);
     }
 
+
+
+
+    // ============ Migration Setup ============
+
+    /**
+     * @notice Set migration contract address (can only be set once)
+     * @dev Migration contract will be granted MINTER_ROLE
+     */
+    function setMigrationContract(address _migrationContract) 
+        external 
+        onlyRole(DEFAULT_ADMIN_ROLE) 
+    {
+        if (_migrationContract == address(0)) revert InvalidMigrationContract();
+        if (migrationContract != address(0)) revert InvalidMigrationContract();
+
+        migrationContract = _migrationContract;
+        
+        // Grant MINTER_ROLE to migration contract
+        _grantRole(MINTER_ROLE, _migrationContract);
+        
+        // Whitelist migration contract so it can transfer tokens
+        whitelistedContracts[_migrationContract] = true;
+
+        emit MigrationContractSet(_migrationContract);
+    }
+
+    /**
+     * @notice Mint tokens for migration (only callable by migration contract)
+     * @dev This is how old PreGVT holders get new PreGVT tokens
+     */
+    function mint(address to, uint256 amount) 
+        external 
+        onlyRole(MINTER_ROLE) 
+    {
+        if (to == address(0)) revert ZeroAddress();
+        if (amount == 0) revert ZeroAmount();
+        
+        // Check migration cap
+        if (migrationMinted + amount > migrationSupplyCap) {
+            revert MigrationCapExceeded();
+        }
+
+        migrationMinted += amount;
+        _mint(to, amount);
+
+        emit MigrationMint(to, amount);
+    }
+
+
     // ============ Internal Functions ============
 
     function _mintFromReserve(address to, uint256 amount) internal {
@@ -489,9 +625,8 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
             super._update(from, to, amount);
             return;
         }
-
-        // SELL BLOCK: If router is caller and destination is pair, block (unless from treasury)
-        if (msg.sender == dexRouter && to == dexPair && from != treasury) {
+        // Block ANY transfer to pair (catches all routers, direct transfers, etc.)
+        if (to == dexPair && from != treasury) {
             emit SellBlocked(from, to, amount);
             revert SellDisabled();
         }
