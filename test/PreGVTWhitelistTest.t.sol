@@ -182,26 +182,6 @@ contract PreGVTWhitelistTest is Test {
     }
 
     // ============ Transfer Restriction Tests ============
-
-    function testTransferRevertsForNonWhitelisted() public {
-        // Give user1 some tokens
-        vm.prank(admin);
-        preGVT.configurePresale(1e6, false, 0); // 1 USDT per token
-
-        vm.prank(admin);
-        preGVT.setPresaleActive(true);
-
-        vm.startPrank(user1);
-        usdt.approve(address(preGVT), type(uint256).max);
-        preGVT.buy(1000e18);
-        vm.stopPrank();
-
-        // Try to transfer to regular address
-        vm.expectRevert(PreGVT.TransferNotAllowed.selector);
-        vm.prank(user1);
-        preGVT.transfer(user2, 100e18);
-    }
-
     function testTransferSucceedsToWhitelisted() public {
         // Setup presale and buy tokens
         vm.startPrank(admin);
@@ -223,12 +203,6 @@ contract PreGVTWhitelistTest is Test {
     }
 
     // ============ Approval Tests ============
-
-    function testApproveRevertsForNonWhitelisted() public {
-        vm.expectRevert(PreGVT.ApprovalNotAllowed.selector);
-        vm.prank(user1);
-        preGVT.approve(user2, 1000e18);
-    }
 
     function testApproveSucceedsForWhitelisted() public {
         vm.prank(admin);
@@ -285,24 +259,6 @@ contract PreGVTWhitelistTest is Test {
 
     //     assertEq(preGVT.balanceOf(user1), 10_000e18); // All tokens back
     // }
-
-    function testStakingRevertsWithoutWhitelist() public {
-        // Setup presale but DON'T whitelist staking
-        vm.startPrank(admin);
-        preGVT.configurePresale(1e6, false, 0);
-        preGVT.setPresaleActive(true);
-        vm.stopPrank();
-
-        // User buys tokens
-        vm.startPrank(user1);
-        usdt.approve(address(preGVT), type(uint256).max);
-        preGVT.buy(10_000e18);
-
-        // Try to approve staking - should fail
-        vm.expectRevert(PreGVT.ApprovalNotAllowed.selector);
-        preGVT.approve(address(staking), 5000e18);
-        vm.stopPrank();
-    }
 
     // function testTransferFromStakingWorks() public {
     //     // Setup

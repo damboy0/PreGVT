@@ -16,7 +16,6 @@ interface IGenesisBadge1155 {
     function redeemByOperator(address owner, uint256 id, uint256 amount) external;
 }
 
-
 /**
  * @title IOldPreGVT
  * @notice Interface for old PreGVT contract to read allocations
@@ -102,7 +101,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     /// @notice Whitelisted contracts that can receive transfers (e.g., staking contracts)
     mapping(address => bool) public whitelistedContracts;
 
-     /// @notice Blacklisted addresses (failsafe mechanism)
+    /// @notice Blacklisted addresses (failsafe mechanism)
     mapping(address => bool) public blacklisted;
 
     /// @notice Price stages for presale (in payment token units)
@@ -144,7 +143,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     event DexRouterUpdated(address indexed newRouter);
     event DexPairUpdated(address indexed newPair);
     event SellBlocked(address indexed from, address indexed to, uint256 amount);
-     event MigrationContractSet(address indexed migrationContract);
+    event MigrationContractSet(address indexed migrationContract);
     event MigrationMint(address indexed to, uint256 amount);
     event AddressBlacklisted(address indexed account, bool status);
     event AllocationSet(address indexed user, uint256 amount);
@@ -172,6 +171,7 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
     error SellDisabled();
     error MigrationCapExceeded();
     error InvalidMigrationContract();
+    error Blacklisted();
 
     // ============ Constructor ============
 
@@ -203,7 +203,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         _grantRole(TREASURY_ROLE, _initialAdmin);
         _grantRole(WHITELIST_MANAGER_ROLE, _initialAdmin);
         _grantRole(BLACKLIST_MANAGER_ROLE, _initialAdmin);
-
 
         emit AirdropReserveDefined(_airdropReserveCap);
     }
@@ -545,27 +544,21 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
         emit Migrated(msg.sender, amount);
     }
 
-
-
-
     // ============ Migration Setup ============
 
     /**
      * @notice Set migration contract address (can only be set once)
      * @dev Migration contract will be granted MINTER_ROLE
      */
-    function setMigrationContract(address _migrationContract) 
-        external 
-        onlyRole(DEFAULT_ADMIN_ROLE) 
-    {
+    function setMigrationContract(address _migrationContract) external onlyRole(DEFAULT_ADMIN_ROLE) {
         if (_migrationContract == address(0)) revert InvalidMigrationContract();
         if (migrationContract != address(0)) revert InvalidMigrationContract();
 
         migrationContract = _migrationContract;
-        
+
         // Grant MINTER_ROLE to migration contract
         _grantRole(MINTER_ROLE, _migrationContract);
-        
+
         // Whitelist migration contract so it can transfer tokens
         whitelistedContracts[_migrationContract] = true;
 
@@ -576,13 +569,10 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      * @notice Mint tokens for migration (only callable by migration contract)
      * @dev This is how old PreGVT holders get new PreGVT tokens
      */
-    function mint(address to, uint256 amount) 
-        external 
-        onlyRole(MINTER_ROLE) 
-    {
+    function mint(address to, uint256 amount) external onlyRole(MINTER_ROLE) {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
-        
+
         // Check migration cap
         if (migrationMinted + amount > migrationSupplyCap) {
             revert MigrationCapExceeded();
@@ -593,7 +583,6 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
 
         emit MigrationMint(to, amount);
     }
-
 
     // ============ Internal Functions ============
 
@@ -614,6 +603,11 @@ contract PreGVT is ERC20, AccessControl, Pausable, ReentrancyGuard {
      *      Allows: treasury → pair (LP add), pair → user (buy), mint/burn, whitelisted contracts
      */
     function _update(address from, address to, uint256 amount) internal override {
+        // Block blacklisted addresses (failsafe)
+        if (blacklisted[from] || blacklisted[to]) {
+            revert Blacklisted();
+        }
+
         // Allow mint/burn
         if (from == address(0) || to == address(0)) {
             super._update(from, to, amount);

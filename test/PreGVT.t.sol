@@ -407,7 +407,7 @@ contract PreGVTTest is Test {
         preGVT.migrateToGVT();
     }
 
-    function testTransferReverts() public {
+    function testUserTransferAllowed() public {
         address[] memory users = new address[](1);
         uint256[] memory amounts = new uint256[](1);
         users[0] = user1;
@@ -416,21 +416,81 @@ contract PreGVTTest is Test {
         vm.prank(distributor);
         preGVT.batchAirdrop(users, amounts);
 
-        vm.expectRevert(PreGVT.TransferNotAllowed.selector);
+        // User-to-user transfer should work
         vm.prank(user1);
         preGVT.transfer(user2, 500e18);
+
+        assertEq(preGVT.balanceOf(user1), 500e18);
+        assertEq(preGVT.balanceOf(user2), 500e18);
     }
 
-    function testTransferFromReverts() public {
-        vm.expectRevert(PreGVT.TransferNotAllowed.selector);
+    function testTransferFromWithApproval() public {
+        address[] memory users = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        users[0] = user1;
+        amounts[0] = 1000e18;
+
+        vm.prank(distributor);
+        preGVT.batchAirdrop(users, amounts);
+
+        // User1 approves user2
         vm.prank(user1);
+        preGVT.approve(user2, 500e18);
+
+        // User2 can transfer from user1
+        vm.prank(user2);
         preGVT.transferFrom(user1, user2, 500e18);
+
+        assertEq(preGVT.balanceOf(user1), 500e18);
+        assertEq(preGVT.balanceOf(user2), 500e18);
     }
 
-    function testApproveReverts() public {
-        vm.expectRevert(PreGVT.ApprovalNotAllowed.selector);
+    function testApproveAllowed() public {
         vm.prank(user1);
-        preGVT.approve(user2, 1000e18);
+        bool success = preGVT.approve(user2, 1000e18);
+
+        assertTrue(success);
+        assertEq(preGVT.allowance(user1, user2), 1000e18);
+    }
+
+    function testSellToPairReverts() public {
+        // Setup: user has tokens
+        address[] memory users = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        users[0] = user1;
+        amounts[0] = 1000e18;
+
+        vm.prank(distributor);
+        preGVT.batchAirdrop(users, amounts);
+
+        // Setup: configure pair address
+        address mockPair = address(0x999);
+        vm.prank(admin);
+        preGVT.setDexPair(mockPair);
+
+        // Try to transfer to pair (simulate sell)
+        vm.expectRevert(PreGVT.SellDisabled.selector);
+        vm.prank(user1);
+        preGVT.transfer(mockPair, 500e18);
+    }
+
+    function testBlacklistBlocks() public {
+        address[] memory users = new address[](1);
+        uint256[] memory amounts = new uint256[](1);
+        users[0] = user1;
+        amounts[0] = 1000e18;
+
+        vm.prank(distributor);
+        preGVT.batchAirdrop(users, amounts);
+
+        // Blacklist user1
+        vm.prank(admin);
+        preGVT.setBlacklisted(user1, true);
+
+        // User1 can't transfer
+        vm.expectRevert();
+        vm.prank(user1);
+        preGVT.transfer(user2, 500e18);
     }
 
     function testReserveCapEnforcement() public {
