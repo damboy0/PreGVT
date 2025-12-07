@@ -31,7 +31,8 @@ contract DeployShadowGVT is Script {
         vm.startBroadcast(deployerKey);
 
         // Step 1: Deploy ShadowGVT with deployer as temporary admin
-        ShadowGVT shadowGVT = new ShadowGVT(msg.sender);
+        // ShadowGVT shadowGVT = new ShadowGVT(msg.sender);
+        ShadowGVT shadowGVT = new ShadowGVT(vm.addr(deployerKey));
         console.log("ShadowGVT deployed at:", address(shadowGVT));
 
         // Step 2: Grant ADMIN_ROLE to Safe Multisig
@@ -82,62 +83,62 @@ interface IERC20Mint {
     function balanceOf(address account) external view returns (uint256);
 }
 
-contract MintAndDeployLP is Script {
-    // BNB Chain addresses
-    address PANCAKE_ROUTER = vm.envAddress("PRIVATE_KEY");
-    address constant USDT_BNB = 0x55d398326f99059fF775485246999027B3197955;
+// contract MintAndDeployLP is Script {
+//     // BNB Chain addresses
+//     address PANCAKE_ROUTER = vm.envAddress("PRIVATE_KEY");
+//     address constant USDT_BNB = 0x55d398326f99059fF775485246999027B3197955;
 
-    function run() public {
-        uint256 deployerKey = vm.envUint("PRIVATE_KEY");
-        address shadowGVTAddr = vm.envAddress("SHADOW_GVT");
-        address safeMultisig = vm.envAddress("SAFE_MULTISIG");
+//     function run() public {
+//         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
+//         address shadowGVTAddr = vm.envAddress("SHADOW_GVT");
+//         address safeMultisig = vm.envAddress("SAFE_MULTISIG");
 
-        require(shadowGVTAddr != address(0), "SHADOW_GVT not set");
-        require(safeMultisig != address(0), "SAFE_MULTISIG not set");
+//         require(shadowGVTAddr != address(0), "SHADOW_GVT not set");
+//         require(safeMultisig != address(0), "SAFE_MULTISIG not set");
 
-        ShadowGVT shadowGVT = ShadowGVT(shadowGVTAddr);
+//         ShadowGVT shadowGVT = ShadowGVT(shadowGVTAddr);
 
-        vm.startBroadcast(deployerKey);
+//         vm.startBroadcast(deployerKey);
 
-        // Using deployer as LP provider (in production, use Safe/Treasury)
-        address lpProvider = msg.sender;
+//         // Using deployer as LP provider (in production, use Safe/Treasury)
+//         address lpProvider = msg.sender;
 
-        // Step 1: Mint LP supply (20 sGVT tokens)
-        uint256 lpAmount = 20e18;
-        shadowGVT.mint(lpProvider, lpAmount);
-        console.log("Minted", lpAmount / 1e18, "sGVT to LP provider");
+//         // Step 1: Mint LP supply (20 sGVT tokens)
+//         uint256 lpAmount = 20e18;
+//         shadowGVT.mint(lpProvider, lpAmount);
+//         console.log("Minted", lpAmount / 1e18, "sGVT to LP provider");
 
-        // Step 2: Approve USDT spending
-        IERC20Mint usdt = IERC20Mint(USDT_BNB);
-        uint256 usdtAmount = 10e18; // 10 USDT equivalent
-        usdt.approve(PANCAKE_ROUTER, usdtAmount);
-        console.log("Approved", usdtAmount / 1e18, "USDT for router");
+//         // Step 2: Approve USDT spending
+//         IERC20Mint usdt = IERC20Mint(USDT_BNB);
+//         uint256 usdtAmount = 10e18; // 10 USDT equivalent
+//         usdt.approve(PANCAKE_ROUTER, usdtAmount);
+//         console.log("Approved", usdtAmount / 1e18, "USDT for router");
 
-        // Step 3: Approve sGVT spending
-        shadowGVT.approve(PANCAKE_ROUTER, lpAmount);
-        console.log("Approved", lpAmount / 1e18, "sGVT for router");
+//         // Step 3: Approve sGVT spending
+//         shadowGVT.approve(PANCAKE_ROUTER, lpAmount);
+//         console.log("Approved", lpAmount / 1e18, "sGVT for router");
 
-        // Step 4: Add liquidity
-        IPancakeRouter router = IPancakeRouter(PANCAKE_ROUTER);
-        (uint256 amountA, uint256 amountB, uint256 liquidity) = router.addLiquidity(
-            shadowGVTAddr,
-            USDT_BNB,
-            lpAmount,
-            usdtAmount,
-            lpAmount, // min 1:1
-            usdtAmount, // min 1:1
-            safeMultisig, // LP tokens to Safe (optional)
-            block.timestamp + 300
-        );
+//         // Step 4: Add liquidity
+//         IPancakeRouter router = IPancakeRouter(PANCAKE_ROUTER);
+//         (uint256 amountA, uint256 amountB, uint256 liquidity) = router.addLiquidity(
+//             shadowGVTAddr,
+//             USDT_BNB,
+//             lpAmount,
+//             usdtAmount,
+//             lpAmount, // min 1:1
+//             usdtAmount, // min 1:1
+//             safeMultisig, // LP tokens to Safe (optional)
+//             block.timestamp + 300
+//         );
 
-        console.log("\n=== LP DEPLOYMENT COMPLETE ===");
-        console.log("sGVT added:", amountA / 1e18);
-        console.log("USDT added:", amountB / 1e18);
-        console.log("Liquidity minted:", liquidity);
+//         console.log("\n=== LP DEPLOYMENT COMPLETE ===");
+//         console.log("sGVT added:", amountA / 1e18);
+//         console.log("USDT added:", amountB / 1e18);
+//         console.log("Liquidity minted:", liquidity);
 
-        vm.stopBroadcast();
-    }
-}
+//         vm.stopBroadcast();
+//     }
+// }
 
 // ============================================================
 // HARDHAT SCRIPTS (TypeScript)

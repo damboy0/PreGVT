@@ -69,7 +69,7 @@ contract PreGVTMigration {
         if (!success) revert TransferFailed();
 
         // Burn old PreGVT
-        oldPreGVT.burn(amount);
+        // oldPreGVT.burn(amount);//
 
         // Mint new PreGVT to user (1:1)
         newPreGVT.mint(msg.sender, amount);

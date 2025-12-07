@@ -13,8 +13,10 @@ contract DeployPreGVT is Script {
     // ============ Configuration ============
 
     // Genesis Badge contract address (update for your network)
-    address constant BADGE_ADDRESS = 0xd1215311b1CabDb911BCaAAc2ebcB291C7659cdc;
-    address constant USDT_ADDRESS = 0x55d398326f99059fF775485246999027B3197955; // USDT token address
+    address constant BADGE_ADDRESS = 0x704fA14dF689EbdFAa4615019aB23a99c6041b29;
+    // 0xB66aA8175cd5E34e95d71168023AAbc981574060; // BSC Testnet
+    address constant USDT_ADDRESS = 0x55d398326f99059fF775485246999027B3197955;
+    //0x55d398326f99059fF775485246999027B3197955;// USDT token address  0x337610d27c682E347C9cD60BD4b3b107C9d34dDd  BSC  Testnet
 
     // Badge ID required for claims
     uint256 constant BADGE_ID = 1;
@@ -151,7 +153,7 @@ contract DeployPreGVT is Script {
         console.log("- Badge Address:", BADGE_ADDRESS);
         console.log("- Badge ID:", BADGE_ID);
         console.log("- Reserve Cap:", RESERVE_CAP / 1e18, "tokens");
-        console.log("- Presale Cap:", PRESALE_CAP / 1e18, "tokens"); // NEW
+        console.log("- Presale :", PRESALE_CAP / 1e18, "tokens"); // NEW
         console.log("\nRoles:");
         console.log("- Admin:", INITIAL_ADMIN);
         console.log("- Distributor:", DISTRIBUTOR);
@@ -200,7 +202,7 @@ contract SetupPreGVT is Script {
         address payable preGvtAddress = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9);
         PreGVT preGVT = PreGVT(preGvtAddress);
 
-        // NEW: Set treasury
+        // NEW: Set treasCapury
         // preGVT.setTreasury(TREASURY_ADDRESS);
         // console.log("Treasury set to:", TREASURY_ADDRESS);
 
@@ -223,7 +225,7 @@ contract SetupPreGVT is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:ConfigurePresale --rpc-url <RPC_URL> --broadcast
  */
 contract ConfigurePresale is Script {
-    address payable PREGVT_ADDRESS = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9); // UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0xa9E59e7990cBFcD5B62aBB12703F0E3a12141C06); // UPDATE THIS
 
     // Presale configuration - UPDATE THESE
     uint256 constant PRICE_PER_TOKEN = 5e15; // 0.005 USDT per token (add 18 decimals)
@@ -263,7 +265,7 @@ contract ConfigurePresale is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:ActivatePresale --rpc-url <RPC_URL> --broadcast
  */
 contract ActivatePresale is Script {
-    address payable PREGVT_ADDRESS = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9); // UPDATE THIS
+    address payable PREGVT_ADDRESS = payable(0xa9E59e7990cBFcD5B62aBB12703F0E3a12141C06); // UPDATE THIS
     bool constant ACTIVATE = true; // Set to false to deactivate
 
     function run() external {
@@ -463,7 +465,7 @@ contract BatchAirdropScript is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:LoadAllocationsFromCSV --rpc-url <RPC_URL> --broadcast
  */
 contract LoadAllocationsFromCSV is Script {
-    address payable constant PREGVT_ADDRESS = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9);
+    address payable constant PREGVT_ADDRESS = payable(0xa9E59e7990cBFcD5B62aBB12703F0E3a12141C06);
     uint256 constant AMOUNT_PER_WALLET = 500e18;
     uint256 constant BATCH_SIZE = 50;
 
@@ -563,7 +565,7 @@ contract LoadAllocationsFromCSV is Script {
  * @dev Run with: forge script script/DeployPreGVT.s.sol:VerifyTier2Allocations --rpc-url <RPC_URL>
  */
 contract VerifyTier2Allocations is Script {
-    address payable constant PREGVT_ADDRESS = payable(0x21cCA8546B1550ee47134AF86AE929C1fA3671c9);
+    address payable constant PREGVT_ADDRESS = payable(0xa9E59e7990cBFcD5B62aBB12703F0E3a12141C06);
     uint256 constant EXPECTED_AMOUNT = 1000e18;
 
     function run() external view {

@@ -6,52 +6,53 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 
 /**
  * @title ShadowGVT
- * @notice transferable preview token for on-chain price visibility before TGE
- *
+ * @notice Transferable preview token for on-chain price visibility before TGE
+ * @dev Standard ERC-20 with no transfer restrictions (per technical requirements)
  *
  * Key properties:
+ * - Standard ERC-20 token (FULLY TRANSFERABLE)
  * - Minting controlled by ADMIN_ROLE (Safe multisig)
- * - No upgradeability, no complex features
- * - Designed for price visibility only - NOT A REAL TOKEN
+ * - No transfer blocking (to avoid wallet risk warnings)
+ * - Static reference price displayed via metadata
+ * - No liquidity pool (price set via metadata, not market)
+ * - Designed for institutional accounting and price visibility
+ * - NOT A TRADING TOKEN - accounting certificate only
  */
 contract ShadowGVT is ERC20, AccessControl {
     // ============ Roles ============
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-    bytes32 public constant BLACKLIST_MANAGER_ROLE = keccak256("BLACKLIST_MANAGER_ROLE");
 
     // ============ Immutable Metadata ============
 
     string public constant AGV_NOTICE =
-        "ShadowGVT is a Transferable preview token for price visibility only. NOT A REAL TOKEN.";
+        "ShadowGVT is a transferable preview token for price visibility and institutional accounting. NOT A TRADING TOKEN.";
 
-    // ============ State Variables ============
-
-    /// @notice Blacklisted addresses (failsafe mechanism)
-    mapping(address => bool) public blacklisted;
+    /// @notice Static reference price in USD (scaled by 1e18)
+    /// @dev This is for display purposes only, updated via metadata
+    uint256 public referencePrice;
 
     // ============ Events ============
 
     event MintedByAdmin(address indexed to, uint256 amount);
-    event BurnedByAdmin(address indexed burner, uint256 amount);
-    event AddressBlacklisted(address indexed account, bool status);
-
-    // ============ Errors ============
-
-    error Blacklisted();
-    error ZeroAddress();
+    event BurnedByAdmin(address indexed from, uint256 amount);
+    event ReferencePriceUpdated(uint256 newPrice);
 
     // ============ Constructor ============
 
     /**
      * @param _initialAdmin Address to grant ADMIN_ROLE and DEFAULT_ADMIN_ROLE
+     * @param _referencePrice Initial reference price (e.g., 0.52614 * 1e18)
      */
-    constructor(address _initialAdmin) ERC20("Shadow GVT", "sGVT") {
+    constructor(address _initialAdmin, uint256 _referencePrice) ERC20("Shadow GVT", "sGVT") {
         require(_initialAdmin != address(0), "Invalid admin address");
+        require(_referencePrice > 0, "Invalid reference price");
+
+        referencePrice = _referencePrice;
+
         // Grant both roles so admin can manage other admins
         _grantRole(DEFAULT_ADMIN_ROLE, _initialAdmin);
         _grantRole(ADMIN_ROLE, _initialAdmin);
-        _grantRole(BLACKLIST_MANAGER_ROLE, _initialAdmin);
     }
 
     // ============ View Functions ============
@@ -68,6 +69,14 @@ contract ShadowGVT is ERC20, AccessControl {
      */
     function isAdmin(address account) external view returns (bool) {
         return hasRole(ADMIN_ROLE, account);
+    }
+
+    /**
+     * @notice Get the reference price in USD (scaled by 1e18)
+     * @dev This is for display purposes - not a market price
+     */
+    function getReferencePrice() external view returns (uint256) {
+        return referencePrice;
     }
 
     // ============ Admin Functions ============
@@ -127,43 +136,37 @@ contract ShadowGVT is ERC20, AccessControl {
         }
     }
 
-    // ============ Blacklist Management (Failsafe) ============
-
     /**
-     * @notice Blacklist an address (emergency failsafe)
-     * @dev Blacklisted addresses cannot mint or burn tokens
+     * @notice Update reference price - ADMIN_ROLE only
+     * @dev This updates the static reference price for display purposes
+     * @param _newPrice New reference price in USD (scaled by 1e18)
      */
-    function setBlacklisted(address account, bool status) external onlyRole(BLACKLIST_MANAGER_ROLE) {
-        if (account == address(0)) revert ZeroAddress();
-        blacklisted[account] = status;
-        emit AddressBlacklisted(account, status);
+    function setReferencePrice(uint256 _newPrice) external onlyRole(ADMIN_ROLE) {
+        require(_newPrice > 0, "Invalid price");
+        referencePrice = _newPrice;
+        emit ReferencePriceUpdated(_newPrice);
     }
 
-    /**
-     * @notice Batch blacklist addresses
-     */
-    function batchSetBlacklisted(address[] calldata accounts, bool status) external onlyRole(BLACKLIST_MANAGER_ROLE) {
-        for (uint256 i = 0; i < accounts.length; i++) {
-            if (accounts[i] == address(0)) revert ZeroAddress();
-            blacklisted[accounts[i]] = status;
-            emit AddressBlacklisted(accounts[i], status);
-        }
-    }
-
-    // ============ Transfer Blocking Logic ============
+    // ============ Standard ERC-20 Logic ============
 
     /**
-     * @notice Override _update to block all transfers except mint/burn
-     * @dev Mint: from == address(0)
-     *      Burn: to == address(0)
-     *      Transfer: from != address(0) && to != address(0) → REVERT
+     * @notice Standard ERC-20 _update - NO RESTRICTIONS
+     * @dev All transfers allowed per technical requirements
+     * 
+     * IMPORTANT: This token is FULLY TRANSFERABLE to avoid wallet warnings.
+     * Non-transferability is handled through:
+     * 1. No liquidity pool (no market to sell on)
+     * 2. Institutional accounting use only
+     * 3. Static price via metadata (not market-driven)
+     * 
+     * This follows industry standards for:
+     * - RWA bookkeeping tokens
+     * - Staking receipt tokens
+     * - Internal accounting certificates
      */
     function _update(address from, address to, uint256 value) internal override {
-        // Block blacklisted addresses (failsafe)
-        if (blacklisted[from] || blacklisted[to]) {
-            revert Blacklisted();
-        }
-
+        // Standard ERC-20 behavior - no restrictions
+        // This prevents wallet risk warnings
         super._update(from, to, value);
     }
 }
